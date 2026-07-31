@@ -5,3 +5,9 @@ docs/
 *:Zone.Identifier
 **/Zone.Identifier
 **/node_modules/
+
+# Local Docker Desktop / buildx config (do not commit)
+.docker-config/
+.env
+.env.*
+!.env.example
