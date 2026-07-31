@@ -1,0 +1,10 @@
+services:
+  frontend:
+    build:
+      context: ./apps/frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_USE_MOCK=true
+    restart: unless-stopped

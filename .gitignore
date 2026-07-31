@@ -4,3 +4,4 @@ docs/
 # Windows/WSL download alternate-data-stream markers
 *:Zone.Identifier
 **/Zone.Identifier
+**/node_modules/
