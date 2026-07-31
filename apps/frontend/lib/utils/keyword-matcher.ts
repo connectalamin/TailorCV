@@ -24,14 +24,15 @@ export function extractKeywords(text: string): string[] {
 export function matchKeywords(
   resumeText: string,
   keywords: string[],
-): { matches: string[]; rate: number } {
+): { matches: string[]; missing: string[]; rate: number } {
   const lower = resumeText.toLowerCase();
   const matches = keywords.filter((k) => lower.includes(k.toLowerCase()));
+  const missing = keywords.filter((k) => !lower.includes(k.toLowerCase()));
   const rate =
     keywords.length === 0
       ? 0
       : Math.round((matches.length / keywords.length) * 100);
-  return { matches, rate };
+  return { matches, missing, rate };
 }
 
 export function resumeToPlainText(data: {
@@ -39,6 +40,7 @@ export function resumeToPlainText(data: {
   title: string;
   summary: string;
   skills: string[];
+  edu?: { co: string; role: string; b: { t: string }[] }[];
   exp: { co: string; role: string; b: { t: string }[] }[];
   projects: { co: string; role: string; b: { t: string }[] }[];
 }): string {
@@ -47,6 +49,7 @@ export function resumeToPlainText(data: {
     data.title,
     data.summary,
     ...data.skills,
+    ...(data.edu ?? []).flatMap((e) => [e.co, e.role, ...e.b.map((x) => x.t)]),
     ...data.exp.flatMap((e) => [e.co, e.role, ...e.b.map((x) => x.t)]),
     ...data.projects.flatMap((e) => [e.co, e.role, ...e.b.map((x) => x.t)]),
   ];

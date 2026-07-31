@@ -1,19 +1,43 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   fetchResumeList,
   getMasterResumeId,
   listApplications,
   uploadMasterResume,
 } from "@/lib/api";
-import type { ResumeListItem } from "@/lib/types/resume";
+import type { Application, ResumeListItem } from "@/lib/types/resume";
+
+function timeAgo(iso?: string) {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "—";
+  const s = Math.floor((Date.now() - d.getTime()) / 1000);
+  if (s < 60) return "just now";
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ago`;
+  const days = Math.floor(h / 24);
+  if (days < 7) return `${days}d ago`;
+  return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
+type Activity = {
+  id: string;
+  label: string;
+  when: string;
+  kind: "resume" | "application";
+  href?: string;
+  status?: string;
+};
 
 export default function DashboardPage() {
   const inputRef = useRef<HTMLInputElement>(null);
   const [resumes, setResumes] = useState<ResumeListItem[]>([]);
-  const [appCount, setAppCount] = useState(0);
+  const [apps, setApps] = useState<Application[]>([]);
   const [loading, setLoading] = useState(true);
   const [uploadOpen, setUploadOpen] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -23,12 +47,12 @@ export default function DashboardPage() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [list, apps] = await Promise.all([
+      const [list, cols] = await Promise.all([
         fetchResumeList(true),
         listApplications(),
       ]);
       setResumes(list);
-      setAppCount(Object.values(apps).flat().length);
+      setApps(Object.values(cols).flat());
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load");
@@ -62,78 +86,103 @@ export default function DashboardPage() {
   const master = resumes.find((r) => r.isMaster);
   const tailored = resumes.filter((r) => !r.isMaster);
   const hasMaster = Boolean(master || getMasterResumeId());
+  const interviews = apps.filter((a) => a.status === "interview").length;
+  const avgMatch = apps.length
+    ? Math.round(apps.reduce((s, a) => s + (a.match ?? 0), 0) / apps.length)
+    : 0;
+
+  const activity = useMemo(() => {
+    const rows: Activity[] = [];
+    for (const r of tailored) {
+      rows.push({
+        id: `r-${r.id}`,
+        label: `Tailored resume · ${r.title}`,
+        when: r.updatedAt,
+        kind: "resume",
+        href: `/resumes/${r.id}`,
+        status: r.status === "ready" ? "Ready" : r.status,
+      });
+    }
+    for (const a of apps) {
+      rows.push({
+        id: `a-${a.id}`,
+        label: `${a.company} · ${a.role}`,
+        when: a.appliedAt || a.dateLabel || "",
+        kind: "application",
+        href: "/tracker",
+        status: a.status,
+      });
+    }
+    return rows
+      .sort((a, b) => {
+        const ta = Date.parse(a.when) || 0;
+        const tb = Date.parse(b.when) || 0;
+        return tb - ta;
+      })
+      .slice(0, 5);
+  }, [apps, tailored]);
 
   return (
-    <div className="mx-auto max-w-5xl px-6 py-8 sm:px-8">
-      <p className="text-[13px] font-medium text-[#2563EB]">Select module</p>
-      <h1 className="mt-1 text-[32px] font-semibold tracking-tight text-[#111827]">
-        Dashboard
-      </h1>
-
+    <div className="page">
       {error ? (
-        <p className="mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+        <p
+          className="t-body-sm mb-4 rounded-[var(--radius-md)] px-3 py-2"
+          style={{
+            background: "#fdecec",
+            color: "var(--danger)",
+            border: "0.5px solid var(--border-danger)",
+          }}
+        >
           {error}
         </p>
       ) : null}
 
-      {/* Stats */}
-      <div className="mt-8 grid gap-3 sm:grid-cols-3">
-        <div className="rounded-2xl border border-[#E5E7EB] bg-white px-5 py-4 shadow-[0_1px_2px_rgba(16,24,40,.04)]">
-          <p className="text-[13px] text-[#6B7280]">Applications sent</p>
-          <p className="mt-2 text-[28px] font-semibold tracking-tight text-[#111827]">
-            {loading ? "—" : appCount}
-          </p>
-        </div>
-        <div className="rounded-2xl border border-[#E5E7EB] bg-white px-5 py-4 shadow-[0_1px_2px_rgba(16,24,40,.04)]">
-          <p className="text-[13px] text-[#6B7280]">Resumes tailored</p>
-          <p className="mt-2 text-[28px] font-semibold tracking-tight text-[#111827]">
-            {loading ? "—" : tailored.length}
-          </p>
-        </div>
-        <div className="rounded-2xl border border-[#E5E7EB] bg-white px-5 py-4 shadow-[0_1px_2px_rgba(16,24,40,.04)]">
-          <p className="text-[13px] text-[#6B7280]">Master resume</p>
-          <p
-            className={[
-              "mt-2 text-[28px] font-semibold tracking-tight",
-              hasMaster ? "text-[#111827]" : "text-[#B45309]",
-            ].join(" ")}
-          >
-            {loading ? "—" : hasMaster ? "Ready" : "Not set"}
-          </p>
-        </div>
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        {[
+          ["Applications sent", loading ? "—" : apps.length],
+          ["Resumes tailored", loading ? "—" : tailored.length],
+          ["Interviews", loading ? "—" : interviews],
+          ["Avg match", loading ? "—" : `${avgMatch}%`],
+        ].map(([label, value]) => (
+          <div key={label as string} className="metric-card">
+            <p className="t-caption text-[var(--text-secondary)]">{label}</p>
+            <p
+              className="mt-2 text-[24px] font-medium tracking-tight"
+              style={{ color: "var(--text-primary)", lineHeight: 1.2 }}
+            >
+              {value}
+            </p>
+          </div>
+        ))}
       </div>
 
-      {/* Action modules */}
-      <div className="mt-4 grid gap-4 lg:grid-cols-2">
-        <div className="flex min-h-[220px] flex-col rounded-2xl border border-[#E5E7EB] bg-white p-6 shadow-[0_1px_2px_rgba(16,24,40,.04)]">
-          <div className="grid h-11 w-11 place-items-center rounded-xl border border-[#E5E7EB] bg-[#F9FAFB] text-[#4B5563]">
-            <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8">
+      <div className="mt-4 grid gap-3 lg:grid-cols-2">
+        <div className="action-card">
+          <div className="icon-box">
+            <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.7">
               <path d="M7 3h7l4 4v14a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z" />
               <path d="M14 3v5h5M12 11v6M9 14h6" />
             </svg>
           </div>
-          <h2 className="mt-5 text-[18px] font-semibold text-[#111827]">
+          <h2 className="t-h3 mt-4 text-[var(--text-primary)]">
             {hasMaster ? "Master resume" : "Initialize master resume"}
           </h2>
-          <p className="mt-2 text-[14px] leading-relaxed text-[#6B7280]">
+          <p className="t-body-sm mt-1.5 text-[var(--text-secondary)]">
             {hasMaster
-              ? `${master?.title || "Master"} is ready — open it or replace the upload.`
+              ? `${master?.sourceFile || "Uploaded"} · parsed ${timeAgo(master?.updatedAt)}`
               : "Set up your base resume once, reuse it everywhere."}
           </p>
-          <div className="mt-auto flex flex-wrap gap-2 pt-6">
+          <div className="mt-auto flex flex-wrap gap-2 pt-5">
             {hasMaster && master ? (
               <Link href={`/resumes/${master.id}`} className="no-underline">
-                <button
-                  type="button"
-                  className="rounded-lg border border-[#E5E7EB] bg-white px-4 py-2.5 text-[13px] font-semibold text-[#111827] hover:bg-[#F9FAFB]"
-                >
+                <button type="button" className="btn btn-secondary">
                   Open master
                 </button>
               </Link>
             ) : null}
             <button
               type="button"
-              className="rounded-lg border border-[#E5E7EB] bg-white px-4 py-2.5 text-[13px] font-semibold text-[#111827] hover:bg-[#F9FAFB]"
+              className="btn btn-secondary"
               onClick={() => setUploadOpen(true)}
             >
               {hasMaster ? "Replace upload" : "Get started"}
@@ -141,19 +190,17 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        <div className="flex min-h-[220px] flex-col rounded-2xl border border-[#BFDBFE] bg-white p-6 shadow-[0_1px_2px_rgba(16,24,40,.04)]">
-          <div className="grid h-11 w-11 place-items-center rounded-xl bg-[#2563EB] text-white">
-            <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8">
-              <path d="M12 3l1.2 3.6L17 8l-3.8 1.4L12 13l-1.2-3.6L7 8l3.8-1.4L12 3zM18 14l.7 2.1L21 17l-2.3.8L18 20l-.7-2.2L15 17l2.3-.9L18 14zM6 15l.6 1.8L8.5 17l-1.9.7L6 19.5l-.6-1.8L3.5 17l1.9-.2L6 15z" />
+        <div className="action-card featured">
+          <div className="icon-box accent">
+            <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.7">
+              <path d="M12 3l1.1 3.3L16.5 8l-3.4 1.2L12 12.5l-1.1-3.3L7.5 8l3.4-1.7L12 3z" />
             </svg>
           </div>
-          <h2 className="mt-5 text-[18px] font-semibold text-[#111827]">
-            Create resume
-          </h2>
-          <p className="mt-2 text-[14px] leading-relaxed text-[#6B7280]">
+          <h2 className="t-h3 mt-4 text-[var(--text-primary)]">Create resume</h2>
+          <p className="t-body-sm mt-1.5 text-[var(--text-secondary)]">
             Tailor a resume from a job description.
           </p>
-          <div className="mt-auto pt-6">
+          <div className="mt-auto pt-5">
             <Link
               href={hasMaster ? "/tailor" : "#"}
               className="no-underline"
@@ -164,10 +211,7 @@ export default function DashboardPage() {
                 }
               }}
             >
-              <button
-                type="button"
-                className="rounded-lg bg-[#2563EB] px-4 py-2.5 text-[13px] font-semibold text-white hover:bg-[#1D4ED8]"
-              >
+              <button type="button" className="btn btn-secondary">
                 Tailor from JD
               </button>
             </Link>
@@ -175,61 +219,106 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* Tailored list */}
-      {tailored.length > 0 ? (
-        <div className="mt-8">
-          <h3 className="mb-3 text-[14px] font-semibold text-[#374151]">
-            Recent tailored resumes
-          </h3>
-          <div className="grid gap-3 sm:grid-cols-2">
-            {tailored.map((item) => (
-              <Link
-                key={item.id}
-                href={`/resumes/${item.id}`}
-                className="rounded-2xl border border-[#E5E7EB] bg-white px-5 py-4 no-underline shadow-[0_1px_2px_rgba(16,24,40,.04)] transition hover:border-[#BFDBFE]"
-              >
-                <p className="text-[15px] font-semibold text-[#111827]">
-                  {item.title}
-                </p>
-                <p className="mt-1 text-[13px] text-[#6B7280]">
-                  {item.company || "Target"} · open
-                </p>
-              </Link>
-            ))}
-          </div>
+      <section className="mt-8">
+        <div className="mb-3 flex items-baseline justify-between gap-3">
+          <h2 className="t-h2 text-[var(--text-primary)]">Recent activity</h2>
+          <Link href="/tracker" className="t-body-sm text-[var(--accent)] no-underline hover:underline">
+            View applications
+          </Link>
         </div>
-      ) : null}
+
+        <div className="panel px-4">
+          {loading ? (
+            <div className="py-8 text-center t-body-sm text-[var(--text-muted)]">
+              Loading…
+            </div>
+          ) : activity.length === 0 ? (
+            <div className="flex flex-col items-center px-4 py-10 text-center">
+              <div className="icon-box mb-3">
+                <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.7">
+                  <path d="M4 6h16M4 12h10M4 18h14" />
+                </svg>
+              </div>
+              <p className="t-body text-[var(--text-secondary)]">
+                No activity yet. Upload a master resume or tailor one for a role.
+              </p>
+              <button
+                type="button"
+                className="btn btn-secondary mt-4"
+                onClick={() => setUploadOpen(true)}
+              >
+                Upload master resume
+              </button>
+            </div>
+          ) : (
+            activity.map((row) => (
+              <Link
+                key={row.id}
+                href={row.href || "/dashboard"}
+                className="list-row no-underline"
+              >
+                <span className="text-[var(--text-secondary)]">
+                  {row.kind === "resume" ? (
+                    <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.7">
+                      <path d="M7 3h7l4 4v14H7V3z" />
+                    </svg>
+                  ) : (
+                    <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.7">
+                      <rect x="4" y="7" width="16" height="13" rx="2" />
+                    </svg>
+                  )}
+                </span>
+                <span className="t-body min-w-0 flex-1 truncate text-[var(--text-primary)]">
+                  {row.label}
+                </span>
+                {row.status ? (
+                  <span className="pill pill-accent hidden sm:inline-flex">
+                    {row.status}
+                  </span>
+                ) : null}
+                <span className="t-body-sm shrink-0 text-[var(--text-muted)]">
+                  {timeAgo(row.when.includes("T") || row.when.includes("-") ? row.when : undefined) === "—"
+                    ? row.when || "—"
+                    : timeAgo(row.when)}
+                </span>
+              </Link>
+            ))
+          )}
+        </div>
+      </section>
 
       {uploadOpen ? (
         <div
-          className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4 backdrop-blur-[2px]"
+          className="fixed inset-0 z-40 flex items-center justify-center p-4"
+          style={{ background: "rgba(0,0,0,0.45)" }}
           onClick={() => !uploading && setUploadOpen(false)}
         >
           <div
-            className="w-full max-w-md overflow-hidden rounded-2xl bg-white shadow-xl"
+            className="panel w-full max-w-[480px] overflow-hidden"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex items-center justify-between border-b border-[#E5E7EB] px-5 py-4">
-              <h2 className="text-[17px] font-semibold text-[#111827]">
-                Upload resume
+            <div className="flex items-center justify-between border-b border-[var(--border)] px-6 py-4">
+              <h2 className="t-h2">
+                {hasMaster ? "Replace master resume" : "Upload resume"}
               </h2>
               <button
                 type="button"
-                className="grid h-8 w-8 place-items-center rounded-lg text-[#6B7280] hover:bg-[#F3F4F6]"
+                className="btn btn-ghost"
+                style={{ width: 32, height: 32, padding: 0 }}
                 onClick={() => setUploadOpen(false)}
                 disabled={uploading}
+                aria-label="Close"
               >
                 ×
               </button>
             </div>
-            <div className="px-5 py-5">
+            <div className="px-6 py-5">
               <div
-                className={[
-                  "rounded-xl border border-dashed p-10 text-center transition",
-                  dragOver
-                    ? "border-[#2563EB] bg-[#EFF6FF]"
-                    : "border-[#D1D5DB] bg-[#F9FAFB]",
-                ].join(" ")}
+                className="rounded-[var(--radius-lg)] border border-dashed p-8 text-center transition"
+                style={{
+                  borderColor: dragOver ? "var(--accent)" : "var(--border-strong)",
+                  background: dragOver ? "var(--accent-bg)" : "var(--surface-0)",
+                }}
                 onDragOver={(e) => {
                   e.preventDefault();
                   setDragOver(true);
@@ -241,11 +330,11 @@ export default function DashboardPage() {
                   void handleFile(e.dataTransfer.files[0]);
                 }}
               >
-                <p className="text-[15px] font-semibold text-[#111827]">
-                  {uploading ? "Parsing with mock AI…" : "Click or drag file"}
+                <p className="t-body font-medium text-[var(--text-primary)]">
+                  {uploading ? "Parsing…" : "Click or drag file"}
                 </p>
-                <p className="mt-1 text-[12px] text-[#6B7280]">
-                  PDF, DOCX, TEX, TXT (max 4MB)
+                <p className="t-body-sm mt-1 text-[var(--text-muted)]">
+                  PDF, DOCX, TEX, TXT — max 4MB
                 </p>
                 <input
                   ref={inputRef}
@@ -254,25 +343,25 @@ export default function DashboardPage() {
                   className="hidden"
                   onChange={(e) => void handleFile(e.target.files?.[0])}
                 />
-                <button
-                  type="button"
-                  className="mt-5 rounded-lg bg-[#2563EB] px-4 py-2.5 text-[13px] font-semibold text-white hover:bg-[#1D4ED8] disabled:opacity-60"
-                  disabled={uploading}
-                  onClick={() => inputRef.current?.click()}
-                >
-                  {uploading ? "Processing…" : "Choose file"}
-                </button>
               </div>
-              <div className="mt-4 flex justify-end">
-                <button
-                  type="button"
-                  className="rounded-lg px-4 py-2 text-[13px] font-semibold text-[#6B7280] hover:bg-[#F3F4F6]"
-                  disabled={uploading}
-                  onClick={() => setUploadOpen(false)}
-                >
-                  Cancel
-                </button>
-              </div>
+            </div>
+            <div className="panel-footer mx-6 mb-5">
+              <button
+                type="button"
+                className="btn btn-ghost"
+                disabled={uploading}
+                onClick={() => setUploadOpen(false)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                disabled={uploading}
+                onClick={() => inputRef.current?.click()}
+              >
+                {uploading ? "Processing…" : "Choose file"}
+              </button>
             </div>
           </div>
         </div>

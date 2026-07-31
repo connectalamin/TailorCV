@@ -4,9 +4,9 @@ Upload a master resume, tailor it to a job description, export a PDF, and track 
 
 ## Status
 
-Frontend-only mock. **UI** follows teal Resume Studio (`index.html`). **Flows** match docs / product screens (dashboard modules, upload modal, tailor, builder tabs, JD match).
+Frontend-only mock. Design system + agent brief: [`AGENTS.md`](AGENTS.md) · tokens: [`apps/frontend/app/ds.css`](apps/frontend/app/ds.css).
 
-**Run via Docker only.**
+**Run via Docker only.** Image includes `pdflatex` for ATS resume PDF export.
 
 ## Run
 
@@ -14,14 +14,15 @@ Frontend-only mock. **UI** follows teal Resume Studio (`index.html`). **Flows** 
 docker compose up --build
 ```
 
-App on port **3000**.
+App on port **3000**. PDF: `POST /api/compile-resume` (also used by Download).
 
 ## Product flow
 
-1. **Dashboard** — Initialize master / Create resume modules + upload modal  
+1. **Dashboard** — metrics, master / create actions, recent activity  
 2. **Tailor** — paste JD → processing → tailored resume  
-3. **Viewer** — Enhance / Edit / Download  
-4. **Builder** — tabs: Resume · Cover Letter · Outreach · JD Match  
+3. **Viewer** — enhance / edit / download  
+4. **Builder** — Resume · Cover · Outreach · JD Match  
 5. **Applications** — kanban with drag-and-drop  
+6. **Settings** — LLM / preferences / danger zone  
 
-Mock: no real OCR/LLM/LaTeX yet.
+Mock: no real OCR/LLM yet. Resume PDF is compiled with **pdflatex** in Docker.

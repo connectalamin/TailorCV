@@ -1,32 +1,5 @@
 @import "tailwindcss";
-
-:root {
-  --bg: #edf1ef;
-  --panel: #ffffff;
-  --line: #dee5e1;
-  --line2: #c7d1cd;
-  --ink: #0f1715;
-  --mut: #57625e;
-  --sub: #8b9591;
-  --teal: #0d9488;
-  --teal-d: #0b7a70;
-  --teal-b: #2dd4bf;
-  --teal-soft: #ccfbf1;
-  --teal-ink: #0f766e;
-  --dark: #0c1413;
-  --dark-2: #131e1c;
-  --dark-line: #243230;
-  --blue: #2563eb;
-  --amber: #d97706;
-  --red: #dc2626;
-  --green: #16a34a;
-  --sans: var(--font-inter), system-ui, -apple-system, "Segoe UI", sans-serif;
-  --disp: var(--font-space), var(--font-inter), sans-serif;
-  --mono: var(--font-mono), ui-monospace, "SF Mono", Menlo, monospace;
-  --serifF: var(--font-serif), Georgia, "Times New Roman", serif;
-  --sh-panel: 0 1px 2px rgba(15, 23, 21, 0.05),
-    0 10px 26px -20px rgba(15, 23, 21, 0.3);
-}
+@import "./ds.css";
 
 @theme inline {
   --color-bg: var(--bg);
@@ -52,140 +25,16 @@
   --font-disp: var(--disp);
   --font-mono: var(--mono);
   --font-serif: var(--serifF);
-  --shadow-panel: var(--sh-panel);
 }
 
-* {
-  box-sizing: border-box;
-}
+html, body { height: 100%; }
+body { margin: 0; font-family: var(--sans); font-size: var(--font-body); font-weight: 400; line-height: 1.6; background: var(--surface-0); color: var(--text-primary); -webkit-font-smoothing: antialiased; }
+::selection { background: var(--accent-bg); }
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+a:has(button) { color: inherit; text-decoration: none; }
 
-html,
-body {
-  height: 100%;
-}
-
-body {
-  margin: 0;
-  font-family: var(--sans);
-  background: var(--bg);
-  color: var(--ink);
-  -webkit-font-smoothing: antialiased;
-}
-
-::selection {
-  background: var(--teal-soft);
-}
-
-a {
-  color: var(--teal);
-  text-decoration: none;
-}
-
-a:hover {
-  text-decoration: underline;
-}
-
-a:has(button) {
-  color: inherit;
-  text-decoration: none;
-}
-
-/* Studio buttons */
-.btn {
-  border-radius: 8px;
-  padding: 9px 12px;
-  font: 600 11.5px var(--sans);
-  cursor: pointer;
-  transition: 0.18s;
-  border: 1px solid transparent;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-}
-
-.btn.prime {
-  background: var(--teal);
-  color: #fff;
-  box-shadow: 0 4px 12px -6px rgba(13, 148, 136, 0.85);
-}
-
-.btn.prime:hover:not(:disabled) {
-  background: #0fa699;
-  transform: translateY(-1px);
-}
-
-.btn.prime:disabled {
-  background: #9fd9d2;
-  cursor: default;
-}
-
-.btn.ghost {
-  background: #fff;
-  border-color: var(--line);
-  color: var(--ink);
-}
-
-.btn.ghost:hover {
-  border-color: var(--teal);
-  color: var(--teal-ink);
-}
-
-.btn.sm {
-  padding: 6px 11px;
-  font-size: 11px;
-}
-
-.btn.danger {
-  background: var(--red);
-  color: #fff;
-}
-
-.fld {
-  display: block;
-  font: 600 9.5px var(--mono);
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: var(--sub);
-  margin-bottom: 7px;
-}
-
-.card {
-  background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: 11px;
-  box-shadow: var(--sh-panel);
-  overflow: hidden;
-}
-
-.card-h {
-  padding: 11px 14px;
-  border-bottom: 1px solid var(--line);
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  background: #fbfcfc;
-}
-
-.card-h h3 {
-  font: 700 12.5px var(--sans);
-  margin: 0;
-}
-
-.card-b {
-  padding: 14px;
-}
-
-.step {
-  font: 700 8.5px var(--mono);
-  color: var(--teal-ink);
-  background: var(--teal-soft);
-  padding: 3px 7px;
-  border-radius: 4px;
-  letter-spacing: 0.1em;
-}
-
-/* Resume sheet (from index.html) */
+/* —— resume / kanban (kept) —— */
 .resume-print {
   background: #fff;
   width: var(--pw, 794px);
@@ -234,7 +83,7 @@ a:has(button) {
 }
 
 .rv-contact a {
-  color: var(--acc, #0d9488);
+  color: inherit;
   text-decoration: none;
 }
 
@@ -373,31 +222,31 @@ a:has(button) {
 }
 
 .resume-tag.hit {
-  background: var(--acc-soft, #ccfbf1);
-  color: var(--acc-ink, #0f766e);
-  border-color: transparent;
-  box-shadow: 0 0 0 1px var(--acc, #0d9488);
+  background: #e5e7eb;
+  color: #111827;
+  border-color: #9ca3af;
+  box-shadow: none;
 }
 
 .resume-text.diff {
-  background: linear-gradient(90deg, var(--acc-soft, #ccfbf1), transparent 88%);
-  box-shadow: inset 2px 0 0 var(--acc, #0d9488);
+  background: linear-gradient(90deg, #f3f4f6, transparent 88%);
+  box-shadow: inset 2px 0 0 #6b7280;
   border-radius: 0 4px 4px 0;
 }
 
 .resume-text.diff.ok {
   background: none;
-  box-shadow: inset 2px 0 0 var(--acc-soft, #ccfbf1);
+  box-shadow: inset 2px 0 0 #d1d5db;
 }
 
 .diff-add {
-  color: var(--acc-ink, #0f766e);
+  color: #111827;
   font-weight: 500;
 }
 
 .ai-chip {
   font: 700 8.5px var(--mono);
-  background: var(--acc, #0d9488);
+  background: #374151;
   color: #fff;
   padding: 1.5px 5px;
   border-radius: 3px;
@@ -432,16 +281,6 @@ a:has(button) {
   border-bottom: 1px solid #e5e7eb;
 }
 
-.swiss .resume-name::after {
-  content: "";
-  display: block;
-  width: 54px;
-  height: 3px;
-  background: var(--acc, #0d9488);
-  margin-top: 9px;
-  border-radius: 1px;
-}
-
 .swiss .resume-section-title {
   font-size: var(--fs, 13px);
   font-weight: 600;
@@ -455,7 +294,7 @@ a:has(button) {
   display: block;
   width: 24px;
   height: 1px;
-  background: var(--acc, #0d9488);
+  background: #111827;
   margin-top: 6px;
 }
 
@@ -476,7 +315,7 @@ a:has(button) {
 
 /* modern */
 .modern .rv-head {
-  border-left: 4px solid var(--acc, #0d9488);
+  border-left: 2px solid #111827;
   padding-left: calc(var(--fs, 13px) * 1.25);
 }
 
@@ -485,7 +324,7 @@ a:has(button) {
 }
 
 .modern .resume-section-title {
-  color: var(--acc, #0d9488);
+  color: #111827;
   font-weight: 700;
   font-size: calc(var(--fs, 13px) * 0.95);
   letter-spacing: 0.1em;
@@ -503,7 +342,7 @@ a:has(button) {
 }
 
 .modern .resume-text::before {
-  background: var(--acc, #0d9488);
+  background: #9ca3af;
 }
 
 .tpl-modern-two-column .rv-body {
@@ -511,7 +350,7 @@ a:has(button) {
   column-gap: calc(var(--fs, 13px) * 2.4);
 }
 
-/* latex */
+/* latex — ATS-safe article (single column, titlerule, no color) */
 .latex {
   --f-head: var(--serifF) !important;
   --f-body: var(--serifF) !important;
@@ -519,53 +358,147 @@ a:has(button) {
 
 .latex .rv-head {
   text-align: center;
-  padding-bottom: 6px;
-}
-
-.latex .resume-name {
-  font-weight: 600;
-  letter-spacing: 0;
-  font-size: calc(var(--name-fs, 28px) * 0.92);
+  padding-bottom: 0;
+  border: none;
 }
 
 .latex .rv-head::after {
-  content: "";
-  display: block;
-  height: 6px;
-  border-top: 2px solid #111827;
-  border-bottom: 1px solid #111827;
-  margin-top: 12px;
+  display: none;
+}
+
+.latex .resume-name {
+  font-weight: 700;
+  letter-spacing: 0;
+  font-size: calc(var(--name-fs, 18px) * 1.05);
+  margin: 0;
+}
+
+.latex .resume-title {
+  display: none;
 }
 
 .latex .rv-contact {
   justify-content: center;
-  margin-top: 9px;
+  margin-top: 6px;
+  font-size: calc(var(--fs, 10.5px) * 0.95);
+  color: #111827;
+  gap: 0;
+  flex-wrap: wrap;
+}
+
+.latex .rv-contact .c-pipe {
+  color: #6b7280;
 }
 
 .latex .rv-contact a {
-  color: #1d4ed8;
+  color: inherit;
+}
+
+.latex .resume-section {
+  margin-top: calc(var(--sec-sp, 24px) * 0.85);
 }
 
 .latex .resume-section-title {
-  font-size: calc(var(--fs, 13px) * 1.05);
+  font-size: calc(var(--fs, 10.5px) * 1.15);
   font-weight: 700;
-  font-variant-caps: small-caps;
-  letter-spacing: 0.05em;
-  display: flex;
-  align-items: center;
-  gap: 10px;
+  letter-spacing: 0;
+  text-transform: none;
   color: #111;
+  padding-bottom: 4px;
+  border-bottom: 1px solid #111827;
+  margin: 0;
 }
 
 .latex .resume-section-title::after {
-  content: "";
-  flex: 1;
-  border-top: 1px solid #9ca3af;
+  display: none;
+}
+
+.latex .resume-items {
+  margin-top: 8px;
+  gap: calc(var(--item-sp, 9px) * 1.1);
+}
+
+.latex .resume-item-title {
+  font-weight: 700;
+  font-size: var(--fs, 10.5px);
 }
 
 .latex .rv-co {
-  font-style: italic;
+  font-style: normal;
   font-weight: 400;
+  color: #111827;
+}
+
+.latex .rv-loc {
+  display: none;
+}
+
+.latex .rv-degree {
+  font-size: var(--fs, 10.5px);
+  color: #111827;
+}
+
+.latex .rv-cgpa {
+  font-size: calc(var(--fs, 10.5px) * 0.95);
+  font-style: italic;
+  color: #111827;
+  white-space: nowrap;
+}
+
+.latex .rv-tech {
+  margin: 1px 0 0;
+  font-size: calc(var(--fs, 10.5px) * 0.95);
+  color: #111827;
+}
+
+.latex .rv-bullets {
+  margin-top: 4px;
+  gap: 2px;
+}
+
+.latex .rv-skill-list .resume-text {
+  color: #111827;
+}
+
+.latex .resume-text {
+  padding-left: 1.1em;
+  color: #111827;
+}
+
+.latex .resume-text::before {
+  content: "•";
+  width: auto;
+  height: auto;
+  background: none;
+  top: 0;
+  left: 0;
+  font-size: 0.95em;
+  line-height: inherit;
+  color: #111827;
+}
+
+.latex .rv-summary {
+  padding-left: 0;
+}
+
+.latex .rv-summary::before {
+  display: none;
+}
+
+.latex .rv-skill-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.latex .rv-skill-line {
+  margin: 0;
+  color: #111827;
+}
+
+.latex .rv-skill-line.hit strong {
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 
 /* clean */
@@ -601,7 +534,7 @@ a:has(button) {
 }
 
 .vivid .resume-name {
-  color: var(--acc, #0d9488);
+  color: #111827;
   font-weight: 700;
 }
 
@@ -611,7 +544,7 @@ a:has(button) {
 }
 
 .vivid .resume-section-title {
-  color: var(--acc, #0d9488);
+  color: #111827;
   font-weight: 700;
   font-size: calc(var(--fs, 13px) * 0.95);
   letter-spacing: 0.11em;
@@ -622,20 +555,19 @@ a:has(button) {
   content: "";
   display: block;
   width: 18px;
-  height: 2px;
-  background: var(--acc, #0d9488);
+  height: 1px;
+  background: #111827;
   margin-top: 5px;
-  border-radius: 1px;
 }
 
 .vivid .resume-text::before {
-  background: var(--acc, #0d9488);
+  background: #9ca3af;
 }
 
 .vivid .resume-tag {
-  background: var(--acc-soft, #ccfbf1);
-  color: var(--acc-ink, #0f766e);
-  border-color: transparent;
+  background: #f3f4f6;
+  color: #374151;
+  border-color: #e5e7eb;
 }
 
 .tpl-vivid .rv-body {
@@ -942,5 +874,34 @@ a:has(button) {
 @media (max-width: 620px) {
   .board {
     grid-template-columns: 1fr;
+  }
+}
+
+/* ---------- studio dashboard (unused on light dashboard) ---------- */
+.studio-canvas {
+  background-color: #f4f6f8;
+}
+
+.dash-rise {
+  animation: rise 0.55s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.pop-in {
+  animation: popIn 0.22s ease;
+}
+
+.skel {
+  border-radius: 6px;
+  background: linear-gradient(100deg, #e4eae7 38%, #f6f9f8 50%, #e4eae7 62%);
+  background-size: 220% 100%;
+  animation: shimmer 1.5s ease-in-out infinite;
+}
+
+@keyframes shimmer {
+  from {
+    background-position: 110% 0;
+  }
+  to {
+    background-position: -110% 0;
   }
 }

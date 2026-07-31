@@ -1,0 +1,24 @@
+---
+description: TailorCV project context — stack, design system, Docker, mock API
+alwaysApply: true
+---
+
+# TailorCV
+
+Resume tailor product. **Frontend mock** under `apps/frontend` (Next.js) plus **pdflatex** in Docker for ATS PDF. Run with `docker compose up --build` on `:3000` — no host `npm install`.
+
+## Before coding UI
+
+1. Read tokens/classes in `apps/frontend/app/ds.css`.
+2. Follow `AGENTS.md` for routes and layout rules.
+3. Accent is teal `#0F6E56` only. Sidebar 220px; top bar one primary CTA; sentence case; weights 400/500.
+4. Dashboard = metrics + action cards + activity **list**. Settings = form panel + sub-nav, not card grid.
+5. Data via `@/lib/api` (mock). PDF via `POST /api/compile-resume` (pdflatex in image).
+
+## Do not
+
+- Neo-brutal / Swiss portable pack UI
+- Blue accent themes or dark charcoal “studio” hero cards
+- Committing `.docker-config/` or `.env`
+- Reintroducing host-side node_modules as the run path
+- Color / multi-column / icons on the default LaTeX resume

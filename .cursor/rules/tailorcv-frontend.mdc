@@ -1,0 +1,13 @@
+---
+description: TailorCV frontend UI — ds.css tokens and component patterns
+globs: apps/frontend/**/*.{tsx,css}
+alwaysApply: false
+---
+
+# Frontend UI
+
+- Import design language from `app/ds.css` (via `globals.css`). Prefer classes: `page`, `metric-card`, `action-card`, `panel`, `list-row`, `btn-primary|secondary|ghost`, `t-h1|h2|h3|body|body-sm|caption`, `field`, `nav-link`.
+- Shell: `components/layout/studio-shell.tsx` — do not add a second nav in page content.
+- One `--accent` filled button per screen. Featured action card uses 2px accent border, not a second primary fill unless the top bar has no CTA.
+- Keep resume sheet CSS (`.resume-print`, template families) intact when editing `globals.css`.
+- After UI changes: `docker compose up -d --build`.

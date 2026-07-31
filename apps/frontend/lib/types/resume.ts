@@ -46,7 +46,15 @@ export type ResumeData = {
   name: string;
   title: string;
   summary: string;
-  contact: { email?: string; phone?: string; linkedin?: string; website?: string; github?: string };
+  contact: {
+    email?: string;
+    phone?: string;
+    linkedin?: string;
+    website?: string;
+    github?: string;
+    /** City / region shown in ATS header contact line */
+    location?: string;
+  };
   exp: ResumeItem[];
   projects: ResumeItem[];
   edu: ResumeItem[];

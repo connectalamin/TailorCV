@@ -1,12 +1,9 @@
 import type { CSSProperties, ReactNode } from "react";
-import {
-  ACCENTS,
-  PAGE,
-  TPL_META,
-} from "@/lib/mock/data";
+import { PAGE, TPL_META } from "@/lib/mock/data";
 import type {
   KeywordHit,
   ResumeData,
+  ResumeItem,
   TemplateSettings,
 } from "@/lib/types/resume";
 
@@ -25,10 +22,6 @@ export function sheetStyle(settings: TemplateSettings): CSSProperties {
   const secSp = [16, 24, 32, 40, 48][settings.sectionSpacing - 1] * cm;
   const itemSp = [5, 9, 14, 19, 24][settings.itemSpacing - 1] * cm;
   const lh = 1.4 + 0.1 * settings.lineHeight;
-  const fam = TPL_META[settings.template].fam;
-  const accentKey = fam === "swiss" ? "teal" : settings.accent;
-  const A = ACCENTS[accentKey];
-
   return {
     ["--pw" as string]: `${p.w}px`,
     ["--ph" as string]: `${p.h}px`,
@@ -41,12 +34,20 @@ export function sheetStyle(settings: TemplateSettings): CSSProperties {
     ["--sec-sp" as string]: `${secSp.toFixed(1)}px`,
     ["--item-sp" as string]: `${itemSp.toFixed(1)}px`,
     ["--lh" as string]: lh.toFixed(2),
-    ["--acc" as string]: A.c,
-    ["--acc-soft" as string]: A.soft,
-    ["--acc-ink" as string]: A.ink,
     ["--f-head" as string]: FONTS[settings.headerFont],
     ["--f-body" as string]: FONTS[settings.bodyFont],
   };
+}
+
+function contactLine(data: ResumeData): string[] {
+  return [
+    data.contact.location,
+    data.contact.email,
+    data.contact.phone,
+    data.contact.linkedin,
+    data.contact.github,
+    data.contact.website,
+  ].filter(Boolean) as string[];
 }
 
 export function ResumePreview({
@@ -65,19 +66,23 @@ export function ResumePreview({
   keywords?: KeywordHit[];
 }) {
   const meta = TPL_META[settings.template];
+  const isLatex = meta.fam === "latex";
   const cls = `resume-print tpl-${settings.template} ${meta.fam} ${
     meta.two ? "two" : "one"
   }`;
 
-  const contactItems = [
-    data.contact.email,
-    data.contact.phone,
-    data.contact.linkedin,
-    data.contact.github,
-    data.contact.website,
-  ].filter(Boolean) as string[];
+  const items = isLatex
+    ? contactLine(data)
+    : ([
+        data.contact.email,
+        data.contact.phone,
+        data.contact.linkedin,
+        data.contact.github,
+        data.contact.website,
+      ].filter(Boolean) as string[]);
 
-  const contactCls = meta.fam === "swiss" ? "col" : "row";
+  const contactCls =
+    meta.fam === "swiss" ? "col" : isLatex ? "pipe" : "row";
 
   function skillHit(s: string) {
     return (
@@ -90,10 +95,10 @@ export function ResumePreview({
     );
   }
 
-  function bullets(items: ResumeData["exp"][0]["b"]) {
+  function bullets(list: ResumeData["exp"][0]["b"]) {
     return (
       <ul className="rv-bullets">
-        {items.map((b) => {
+        {list.map((b) => {
           const diff = tailored && b.d;
           const c = diff ? (confirmed ? " diff ok" : " diff") : "";
           return (
@@ -113,23 +118,56 @@ export function ResumePreview({
     );
   }
 
-  function itemBlock(it: ResumeData["exp"][0]) {
+  function itemBlock(it: ResumeItem, kind: "exp" | "project" | "edu" = "exp") {
+    if (isLatex && kind === "edu") {
+      return (
+        <article key={`${it.role}-${it.meta}`} className="resume-item">
+          <div className="rv-item-top">
+            <h4 className="resume-item-title">{it.role}</h4>
+            <span className="resume-item-meta">{it.meta}</span>
+          </div>
+          {(it.co || it.loc) && (
+            <div className="rv-item-sub">
+              {it.co ? <span className="rv-degree">{it.co}</span> : <span />}
+              {it.loc ? <span className="rv-cgpa">{it.loc}</span> : null}
+            </div>
+          )}
+          {it.b.length ? bullets(it.b) : null}
+        </article>
+      );
+    }
+
+    if (isLatex && kind === "project") {
+      return (
+        <article key={it.role} className="resume-item">
+          <div className="rv-item-top">
+            <h4 className="resume-item-title">{it.role}</h4>
+            {it.meta ? <span className="resume-item-meta">{it.meta}</span> : null}
+          </div>
+          {it.co ? <p className="rv-tech">{it.co}</p> : null}
+          {it.b.length ? bullets(it.b) : null}
+        </article>
+      );
+    }
+
     return (
       <article key={`${it.co}-${it.role}-${it.meta}`} className="resume-item">
         <div className="rv-item-top">
           <h4 className="resume-item-title">{it.role}</h4>
           <span className="resume-item-meta">{it.meta}</span>
         </div>
-        <div className="rv-item-sub">
-          <span className="rv-co">{it.co}</span>
-          <span className="rv-loc">{it.loc}</span>
-        </div>
+        {it.co ? (
+          <div className="rv-item-sub">
+            <span className="rv-co">{it.co}</span>
+          </div>
+        ) : null}
         {it.b.length ? bullets(it.b) : null}
       </article>
     );
   }
 
-  function section(title: string, inner: ReactNode) {
+  function section(title: string, inner: ReactNode, empty = false) {
+    if (empty) return null;
     return (
       <section className="resume-section">
         <h3 className="resume-section-title">{title}</h3>
@@ -138,68 +176,154 @@ export function ResumePreview({
     );
   }
 
-  const summary = section(
-    "Summary",
+  const objective = section(
+    isLatex ? "Objective" : "Summary",
     <p className="resume-text rv-summary">{data.summary}</p>,
+    !data.summary,
   );
-  const exp = section("Work Experience", data.exp.map(itemBlock));
-  const projects = section("Projects", data.projects.map(itemBlock));
-  const edu = section("Education", data.edu.map(itemBlock));
+  const exp = section(
+    "Experience",
+    data.exp.map((it) => itemBlock(it, "exp")),
+    !data.exp.length,
+  );
+  const projects = section(
+    "Projects",
+    data.projects.map((it) => itemBlock(it, "project")),
+    !data.projects.length,
+  );
+  const edu = section(
+    "Education",
+    data.edu.map((it) => itemBlock(it, "edu")),
+    !data.edu.length,
+  );
   const skills = section(
-    "Skills",
-    <div className="rv-tags">
-      {data.skills.map((s) => (
-        <span key={s} className={`resume-tag${skillHit(s) ? " hit" : ""}`}>
-          {s}
-        </span>
-      ))}
-    </div>,
+    isLatex ? "Technical Skills" : "Skills",
+    isLatex ? (
+      <ul className="rv-bullets rv-skill-list">
+        {data.skills.map((s) => {
+          const i = s.indexOf(":");
+          return (
+            <li
+              key={s}
+              className={`resume-text${skillHit(s) ? " hit" : ""}`}
+            >
+              {i > 0 ? (
+                <>
+                  <strong>{s.slice(0, i + 1)}</strong>
+                  {s.slice(i + 1)}
+                </>
+              ) : (
+                s
+              )}
+            </li>
+          );
+        })}
+      </ul>
+    ) : (
+      <div className="rv-tags">
+        {data.skills.map((s) => (
+          <span key={s} className={`resume-tag${skillHit(s) ? " hit" : ""}`}>
+            {s}
+          </span>
+        ))}
+      </div>
+    ),
+    !data.skills.length,
   );
-  const langs = section(
-    "Languages",
-    data.langs.map(([a, b]) => (
-      <article key={a} className="resume-item rv-pair">
-        <div className="rv-item-top">
-          <h4 className="resume-item-title" style={{ fontWeight: 500 }}>
+  const achievements = section(
+    isLatex ? "Achievements" : "Awards",
+    isLatex ? (
+      <ul className="rv-bullets">
+        {data.awards.map(([a, b]) => (
+          <li key={a} className="resume-text">
             {a}
-          </h4>
-          <span className="resume-item-meta">{b}</span>
-        </div>
-      </article>
-    )),
+            {b ? ` — ${b}` : ""}
+          </li>
+        ))}
+      </ul>
+    ) : (
+      data.awards.map(([a, b]) => (
+        <article key={a} className="resume-item rv-pair">
+          <div className="rv-item-top">
+            <h4 className="resume-item-title" style={{ fontWeight: 500 }}>
+              {a}
+            </h4>
+            <span className="resume-item-meta">{b}</span>
+          </div>
+        </article>
+      ))
+    ),
+    !data.awards.length,
+  );
+  const activities = section(
+    isLatex ? "Activities" : "Languages",
+    isLatex ? (
+      <ul className="rv-bullets">
+        {data.langs.map(([a, b]) => (
+          <li key={a} className="resume-text">
+            {a}
+            {b ? ` (${b})` : ""}
+          </li>
+        ))}
+      </ul>
+    ) : (
+      data.langs.map(([a, b]) => (
+        <article key={a} className="resume-item rv-pair">
+          <div className="rv-item-top">
+            <h4 className="resume-item-title" style={{ fontWeight: 500 }}>
+              {a}
+            </h4>
+            <span className="resume-item-meta">{b}</span>
+          </div>
+        </article>
+      ))
+    ),
+    !data.langs.length,
   );
   const certs = section(
     "Certifications",
-    data.certs.map(([a, b]) => (
-      <article key={a} className="resume-item rv-pair">
-        <div className="rv-item-top">
-          <h4 className="resume-item-title" style={{ fontWeight: 500 }}>
+    isLatex ? (
+      <ul className="rv-bullets">
+        {data.certs.map(([a, b]) => (
+          <li key={a} className="resume-text">
             {a}
-          </h4>
-          <span className="resume-item-meta">{b}</span>
-        </div>
-      </article>
-    )),
-  );
-  const awards = section(
-    "Awards",
-    data.awards.map(([a, b]) => (
-      <article key={a} className="resume-item rv-pair">
-        <div className="rv-item-top">
-          <h4 className="resume-item-title" style={{ fontWeight: 500 }}>
-            {a}
-          </h4>
-          <span className="resume-item-meta">{b}</span>
-        </div>
-      </article>
-    )),
+            {b ? ` (${b})` : ""}
+          </li>
+        ))}
+      </ul>
+    ) : (
+      data.certs.map(([a, b]) => (
+        <article key={a} className="resume-item rv-pair">
+          <div className="rv-item-top">
+            <h4 className="resume-item-title" style={{ fontWeight: 500 }}>
+              {a}
+            </h4>
+            <span className="resume-item-meta">{b}</span>
+          </div>
+        </article>
+      ))
+    ),
+    !data.certs.length,
   );
 
+  /* ATS order: Objective → Skills → Achievements → Education → Experience → Projects → Certs → Activities */
+  const latexSecs = [
+    objective,
+    skills,
+    achievements,
+    edu,
+    exp,
+    projects,
+    certs,
+    activities,
+  ].filter(Boolean);
   const mainSecs = meta.two
     ? [exp, projects, certs]
-    : [summary, exp, projects, edu, skills, langs, certs, awards];
+    : isLatex
+      ? latexSecs
+      : [objective, exp, projects, edu, skills, activities, certs, achievements];
   const sideSecs = meta.two
-    ? [summary, edu, skills, langs, awards]
+    ? [objective, edu, skills, activities, achievements]
     : [];
 
   return (
@@ -207,16 +331,20 @@ export function ResumePreview({
       <header className="rv-head">
         <div className="rv-id">
           <h1 className="resume-name">{data.name}</h1>
-          <p className="resume-title">{data.title}</p>
+          {!isLatex && data.title ? (
+            <p className="resume-title">{data.title}</p>
+          ) : null}
         </div>
         <address className={`rv-contact ${contactCls}`}>
-          {contactItems.map((t) => (
+          {items.map((t, i) => (
             <span key={t} className="c-item">
-              {t.includes("@") || t.includes(".") ? (
-                <span style={{ color: "var(--acc, #0D9488)" }}>{t}</span>
-              ) : (
-                t
-              )}
+              {isLatex && i > 0 ? (
+                <span className="c-pipe" aria-hidden>
+                  {" "}
+                  |{" "}
+                </span>
+              ) : null}
+              {t}
             </span>
           ))}
         </address>

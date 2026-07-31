@@ -2,6 +2,8 @@ import { delay, USE_MOCK_API } from "@/lib/api/client";
 import {
   SAMPLE_KEYWORDS,
   SAMPLE_RESUME,
+  defaultCoverLetter,
+  defaultOutreachMail,
   masterFromUpload,
 } from "@/lib/mock/data";
 import type {
@@ -148,8 +150,8 @@ export async function improveResume(
     const jd =
       jdText?.trim() ||
       "Senior Frontend Engineer — React, TypeScript, design systems.";
-    const coverLetter = `Dear Hiring Manager,\n\nI am writing to express interest in the ${data.title} role. With experience across ${data.skills.slice(0, 4).join(", ")}, I build reliable product interfaces and design systems.\n\n${data.summary}\n\nI would welcome the chance to discuss how I can contribute.\n\nSincerely,\n${data.name}`;
-    const outreachMessage = `Hi — saw the ${data.title} opening. I've shipped similar work (React/TS, accessibility, CI). Happy to share a tailored resume if useful.\n\n— ${data.name}`;
+    const coverLetter = defaultCoverLetter(data);
+    const outreachMessage = defaultOutreachMail(data);
     resumes = [
       ...resumes,
       {
@@ -229,15 +231,33 @@ export async function confirmTailor(
 }
 
 export async function downloadResumePdf(resumeId: string): Promise<Blob> {
-  if (USE_MOCK_API) {
-    await delay(900);
-    void resumeId;
-    return new Blob(
-      ["%PDF-1.4\n% Mock PDF — wire LaTeX backend later\n"],
-      { type: "application/pdf" },
-    );
+  ensureLoaded();
+  const record = resumes.find((r) => r.id === resumeId);
+  if (!record) throw new Error("Resume not found");
+
+  const res = await fetch("/api/compile-resume", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      data: record.data,
+      pageSize: "LETTER",
+      marginIn: 0.75,
+      filename: record.data.name,
+    }),
+  });
+
+  if (!res.ok) {
+    let detail = `PDF compile failed (${res.status})`;
+    try {
+      const j = (await res.json()) as { error?: string };
+      if (j.error) detail = j.error;
+    } catch {
+      /* ignore */
+    }
+    throw new Error(detail);
   }
-  throw new Error("Backend not connected");
+
+  return res.blob();
 }
 
 export function getMasterResumeId(): string | null {

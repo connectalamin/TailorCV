@@ -14,6 +14,8 @@ import {
   DEFAULT_TEMPLATE_SETTINGS,
   PAGE,
   TPL_META,
+  defaultCoverLetter,
+  defaultOutreachMail,
 } from "@/lib/mock/data";
 import type {
   ResumeData,
@@ -33,15 +35,29 @@ type DocTab = "resume" | "cover" | "outreach" | "jd";
 const SETTINGS_KEY = "resume_builder_settings";
 const DRAFT_KEY = "resume_builder_draft";
 
+const DOC_TABS: { id: DocTab; label: string }[] = [
+  { id: "resume", label: "Resume" },
+  { id: "cover", label: "Cover letter" },
+  { id: "outreach", label: "Outreach mail" },
+  { id: "jd", label: "JD match" },
+];
+
 function loadSettings(): TemplateSettings {
   if (typeof window === "undefined") return DEFAULT_TEMPLATE_SETTINGS;
   try {
     const raw = localStorage.getItem(SETTINGS_KEY);
-    if (raw) return { ...DEFAULT_TEMPLATE_SETTINGS, ...JSON.parse(raw) };
+    if (raw) {
+      const parsed = JSON.parse(raw) as Partial<TemplateSettings>;
+      return { ...DEFAULT_TEMPLATE_SETTINGS, ...parsed };
+    }
   } catch {
     /* ignore */
   }
   return structuredClone(DEFAULT_TEMPLATE_SETTINGS);
+}
+
+function wordCount(s: string) {
+  return s.trim().split(/\s+/).filter(Boolean).length;
 }
 
 export default function BuilderClient() {
@@ -54,8 +70,9 @@ export default function BuilderClient() {
   const [data, setData] = useState<ResumeData>(getSampleResume());
   const [cover, setCover] = useState("");
   const [outreach, setOutreach] = useState("");
+  const [subject, setSubject] = useState("");
   const [jd, setJd] = useState("");
-  const [zoom, setZoom] = useState(0.75);
+  const [zoom, setZoom] = useState(0.78);
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
 
@@ -64,18 +81,30 @@ export default function BuilderClient() {
   const load = useCallback(async () => {
     setSettings(loadSettings());
     if (!id) {
-      setData(getSampleResume());
+      const sample = getSampleResume();
+      setData(sample);
+      setCover(defaultCoverLetter(sample));
+      setOutreach(defaultOutreachMail(sample));
+      setSubject(`Interest in ${sample.title}`);
       return;
     }
     try {
       const r = await fetchResume(id);
       setRecord(r);
       setData(r.data);
-      setCover(r.coverLetter || "");
-      setOutreach(r.outreachMessage || "");
+      setCover(r.coverLetter || defaultCoverLetter(r.data, r.role));
+      setOutreach(r.outreachMessage || defaultOutreachMail(r.data, r.role));
+      setSubject(
+        r.company
+          ? `Application — ${r.role || r.data.title} at ${r.company}`
+          : `Interest in ${r.role || r.data.title}`,
+      );
       setJd(r.jobDescription || "");
     } catch {
-      setData(getSampleResume());
+      const sample = getSampleResume();
+      setData(sample);
+      setCover(defaultCoverLetter(sample));
+      setOutreach(defaultOutreachMail(sample));
     }
   }, [id]);
 
@@ -90,9 +119,9 @@ export default function BuilderClient() {
   useEffect(() => {
     localStorage.setItem(
       DRAFT_KEY,
-      JSON.stringify({ data, cover, outreach, jd, id }),
+      JSON.stringify({ data, cover, outreach, subject, jd, id }),
     );
-  }, [data, cover, outreach, jd, id]);
+  }, [data, cover, outreach, subject, jd, id]);
 
   const keywords = useMemo(() => extractKeywords(jd), [jd]);
   const match = useMemo(() => {
@@ -137,6 +166,8 @@ export default function BuilderClient() {
       a.download = `${data.name.replace(/\s+/g, "_")}.pdf`;
       a.click();
       URL.revokeObjectURL(url);
+    } catch (e) {
+      setToast(e instanceof Error ? e.message : "Download failed");
     } finally {
       setBusy(false);
     }
@@ -149,39 +180,68 @@ export default function BuilderClient() {
   }, [toast]);
 
   const page = PAGE[settings.pageSize];
-  const fam = TPL_META[settings.template].fam;
+  const today = new Date().toLocaleDateString("en-US", {
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+  });
+
+  const contactBits = [
+    data.contact.location,
+    data.contact.email,
+    data.contact.phone,
+    data.contact.linkedin,
+  ]
+    .filter(Boolean)
+    .join("  ·  ");
+
+  const docTitle =
+    record?.title ||
+    (record?.role ? record.role : null) ||
+    data.name ||
+    "Untitled resume";
+
+  const docSub = [
+    data.name,
+    TPL_META[settings.template].name,
+    settings.pageSize === "LETTER" ? "US Letter" : "A4",
+  ]
+    .filter(Boolean)
+    .join(" · ");
 
   return (
-    <div className="flex h-full flex-col overflow-hidden">
-      <header className="flex flex-wrap items-center justify-between gap-3 border-b border-line bg-white px-5 py-3">
-        <div>
-          <Link
-            href="/dashboard"
-            className="font-mono text-[11px] font-semibold tracking-wider text-teal-ink no-underline uppercase"
-          >
-            ← Back to Dashboard
-          </Link>
-          <h1 className="font-[family-name:var(--disp)] text-2xl font-bold tracking-tight">
-            Resume Builder
-          </h1>
-          <p className="font-mono text-[10px] font-bold tracking-[0.14em] text-teal uppercase">
-            // edit mode
-          </p>
+    <div className="flex h-full flex-col overflow-hidden bg-[var(--surface-0)]">
+      <header className="builder-topbar">
+        <div className="builder-topbar-meta min-w-0">
+          <div className="flex items-center gap-2">
+            <Link
+              href="/dashboard"
+              className="t-body-sm text-[var(--text-muted)] no-underline hover:text-[var(--text-primary)]"
+            >
+              Dashboard
+            </Link>
+            <span className="t-body-sm text-[var(--text-muted)]" aria-hidden>
+              /
+            </span>
+            <p className="t-caption text-[var(--accent)]">Builder</p>
+          </div>
+          <h1 className="t-h1 truncate text-[var(--text-primary)]">{docTitle}</h1>
+          <p className="t-body-sm truncate text-[var(--text-muted)]">{docSub}</p>
         </div>
-        <div className="flex flex-wrap gap-2">
+        <div className="builder-topbar-actions">
           <button
             type="button"
-            className="btn ghost"
+            className="btn-ghost"
             onClick={() => {
               setSettings(structuredClone(DEFAULT_TEMPLATE_SETTINGS));
-              setToast("Settings reset");
+              setToast("Reset to LaTeX ATS defaults");
             }}
           >
             Reset
           </button>
           <button
             type="button"
-            className="btn ghost"
+            className="btn-secondary"
             disabled={busy}
             onClick={() => void onSave()}
           >
@@ -189,61 +249,65 @@ export default function BuilderClient() {
           </button>
           <button
             type="button"
-            className="btn prime"
+            className="btn-primary"
             disabled={busy || !id}
             onClick={() => void onDownload()}
           >
-            Download
+            {busy ? "Working…" : "Download PDF"}
           </button>
         </div>
       </header>
 
-      <div className="grid min-h-0 flex-1 lg:grid-cols-[340px_1fr]">
-        {/* Left panel */}
-        <aside className="overflow-y-auto border-r border-line bg-panel">
+      <div className="builder-tabs" role="tablist" aria-label="Document type">
+        {DOC_TABS.map((t) => (
+          <button
+            key={t.id}
+            type="button"
+            role="tab"
+            aria-selected={tab === t.id}
+            className="builder-tab"
+            onClick={() => setTab(t.id)}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      <div className="grid min-h-0 flex-1 lg:grid-cols-[320px_1fr]">
+        <aside className="overflow-y-auto border-r border-[var(--border)] bg-[var(--surface-1)]">
           {tab === "resume" ? (
-            <div className="space-y-6 p-4">
-              <p className="font-mono text-[10px] font-bold tracking-[0.14em] text-teal uppercase">
-                ■ Editor panel
-              </p>
+            <div className="space-y-5 p-4">
+              <p className="t-caption">Template</p>
+              <div className="grid grid-cols-2 gap-2">
+                {(Object.keys(TPL_META) as TemplateId[]).map((tid) => (
+                  <button
+                    key={tid}
+                    type="button"
+                    className={[
+                      "rounded-[var(--radius-md)] border px-2 py-2 text-left text-[12px] font-medium transition",
+                      settings.template === tid
+                        ? "border-[var(--accent)] bg-[var(--accent-bg)] text-[var(--accent)]"
+                        : "border-[var(--border)] bg-white text-[var(--text-secondary)] hover:border-[var(--border-strong)]",
+                    ].join(" ")}
+                    onClick={() => patchSettings({ template: tid })}
+                  >
+                    {TPL_META[tid].name}
+                  </button>
+                ))}
+              </div>
 
-              <section>
-                <p className="mb-2 text-[11px] font-bold tracking-wide uppercase">
-                  Template
-                </p>
-                <div className="grid grid-cols-2 gap-2">
-                  {(Object.keys(TPL_META) as TemplateId[]).map((tid) => (
-                    <button
-                      key={tid}
-                      type="button"
-                      className={[
-                        "rounded-lg border px-2 py-2 text-left text-[11px] font-semibold transition",
-                        settings.template === tid
-                          ? "border-teal bg-teal-soft/40 text-teal-ink"
-                          : "border-line bg-white hover:border-line2",
-                      ].join(" ")}
-                      onClick={() => patchSettings({ template: tid })}
-                    >
-                      {TPL_META[tid].name}
-                    </button>
-                  ))}
-                </div>
-              </section>
-
-              <section>
-                <p className="mb-2 text-[11px] font-bold tracking-wide uppercase">
-                  Page size
-                </p>
+              <div>
+                <p className="t-caption mb-2">Page size</p>
                 <div className="grid grid-cols-2 gap-2">
                   {(["A4", "LETTER"] as const).map((ps) => (
                     <button
                       key={ps}
                       type="button"
                       className={[
-                        "rounded-lg border px-3 py-2 text-sm font-bold",
+                        "rounded-[var(--radius-md)] border px-3 py-2 text-[13px] font-medium",
                         settings.pageSize === ps
-                          ? "border-teal bg-teal text-white"
-                          : "border-line bg-white",
+                          ? "border-[var(--accent)] bg-[var(--accent)] text-white"
+                          : "border-[var(--border)] bg-white",
                       ].join(" ")}
                       onClick={() => patchSettings({ pageSize: ps })}
                     >
@@ -251,12 +315,10 @@ export default function BuilderClient() {
                     </button>
                   ))}
                 </div>
-              </section>
+              </div>
 
-              <section className="space-y-2">
-                <p className="text-[11px] font-bold tracking-wide uppercase">
-                  Margins (mm)
-                </p>
+              <div className="space-y-2">
+                <p className="t-caption">Margins (mm)</p>
                 {(
                   [
                     ["top", "Top"],
@@ -265,12 +327,14 @@ export default function BuilderClient() {
                     ["right", "Right"],
                   ] as const
                 ).map(([k, label]) => (
-                  <label key={k} className="flex items-center gap-2 text-xs">
-                    <span className="w-10 font-mono text-sub">{label}</span>
+                  <label key={k} className="flex items-center gap-2 text-[12px]">
+                    <span className="w-12 text-[var(--text-secondary)]">
+                      {label}
+                    </span>
                     <input
                       type="range"
-                      min={6}
-                      max={24}
+                      min={10}
+                      max={30}
                       value={settings.margins[k]}
                       onChange={(e) =>
                         patchSettings({
@@ -282,12 +346,12 @@ export default function BuilderClient() {
                       }
                       className="flex-1"
                     />
-                    <span className="w-8 font-mono text-teal-ink">
+                    <span className="w-8 font-mono text-[var(--text-muted)]">
                       {settings.margins[k]}
                     </span>
                   </label>
                 ))}
-              </section>
+              </div>
 
               {(
                 [
@@ -297,21 +361,26 @@ export default function BuilderClient() {
                   ["fontSize", "Base"],
                 ] as const
               ).map(([key, label]) => (
-                <div key={key} className="flex items-center justify-between gap-2">
-                  <span className="text-xs font-medium">{label}</span>
-                  <div className="flex gap-0.5 rounded-lg border border-line bg-[#F1F5F3] p-0.5">
+                <div
+                  key={key}
+                  className="flex items-center justify-between gap-2"
+                >
+                  <span className="text-[12px] font-medium">{label}</span>
+                  <div className="flex gap-0.5 rounded-[var(--radius-sm)] border border-[var(--border)] bg-[var(--surface-0)] p-0.5">
                     {[1, 2, 3, 4, 5].map((v) => (
                       <button
                         key={v}
                         type="button"
                         className={[
-                          "h-[23px] min-w-[22px] rounded-[5px] font-mono text-[10.5px] font-semibold",
+                          "h-[23px] min-w-[22px] rounded-[4px] font-mono text-[10.5px] font-medium",
                           settings[key] === v
-                            ? "bg-ink text-white"
-                            : "text-sub hover:bg-white",
+                            ? "bg-[var(--text-primary)] text-white"
+                            : "text-[var(--text-secondary)] hover:bg-white",
                         ].join(" ")}
                         onClick={() =>
-                          patchSettings({ [key]: v } as Partial<TemplateSettings>)
+                          patchSettings({
+                            [key]: v,
+                          } as Partial<TemplateSettings>)
                         }
                       >
                         {v}
@@ -324,153 +393,186 @@ export default function BuilderClient() {
           ) : null}
 
           {tab === "cover" ? (
-            <div className="flex h-full flex-col p-4">
-              <p className="font-mono text-[10px] font-bold tracking-[0.14em] text-teal uppercase">
-                ■ Cover letter editor
-              </p>
-              <div className="mt-2 flex items-center justify-between text-[11px] text-mut">
-                <span>
-                  {cover.trim().split(/\s+/).filter(Boolean).length} words /{" "}
-                  {cover.length} chars
+            <div className="flex h-full flex-col gap-3 p-4">
+              <div>
+                <p className="t-caption">Cover letter</p>
+                <p className="t-body-sm mt-1 text-[var(--text-secondary)]">
+                  Formal one-page letter. Mirror keywords from the JD.
+                </p>
+              </div>
+              <div className="flex items-center justify-between gap-2">
+                <span className="t-body-sm text-[var(--text-muted)]">
+                  {wordCount(cover)} words
                 </span>
                 <button
                   type="button"
-                  className="btn prime sm"
-                  disabled={busy}
-                  onClick={() => void onSave()}
+                  className="btn-ghost"
+                  onClick={() =>
+                    setCover(defaultCoverLetter(data, record?.role))
+                  }
                 >
-                  Save
+                  Insert template
                 </button>
               </div>
-              <textarea
-                className="mt-3 min-h-[280px] flex-1 rounded-lg border border-line bg-bg p-3 font-mono text-[12px] leading-relaxed outline-none focus:border-teal"
-                value={cover}
-                onChange={(e) => setCover(e.target.value)}
-              />
-              <p className="mt-2 font-mono text-[10px] text-sub">
-                Tip: aim for 300–400 words.
+              <div className="field flex-1">
+                <textarea
+                  className="min-h-[320px] flex-1 resize-none font-[family-name:var(--serifF)] text-[13px] leading-relaxed"
+                  value={cover}
+                  onChange={(e) => setCover(e.target.value)}
+                  placeholder="Dear Hiring Manager,…"
+                />
+              </div>
+              <p className="t-body-sm text-[var(--text-muted)]">
+                Aim for 250–400 words. Keep black text only for ATS paste.
               </p>
             </div>
           ) : null}
 
           {tab === "outreach" ? (
-            <div className="flex h-full flex-col p-4">
-              <p className="font-mono text-[10px] font-bold tracking-[0.14em] text-teal uppercase">
-                ■ Outreach editor
-              </p>
-              <textarea
-                className="mt-3 min-h-[220px] flex-1 rounded-lg border border-line bg-bg p-3 font-mono text-[12px] leading-relaxed outline-none focus:border-teal"
-                value={outreach}
-                onChange={(e) => setOutreach(e.target.value)}
-              />
+            <div className="flex h-full flex-col gap-3 p-4">
+              <div>
+                <p className="t-caption">Outreach mail</p>
+                <p className="t-body-sm mt-1 text-[var(--text-secondary)]">
+                  Short cold email / LinkedIn note. 80–120 words works best.
+                </p>
+              </div>
+              <div className="field">
+                <label htmlFor="outreach-subject">Subject</label>
+                <input
+                  id="outreach-subject"
+                  value={subject}
+                  onChange={(e) => setSubject(e.target.value)}
+                  placeholder="Interest in Role — Company"
+                />
+              </div>
+              <div className="flex items-center justify-between gap-2">
+                <span className="t-body-sm text-[var(--text-muted)]">
+                  {wordCount(outreach)} words
+                </span>
+                <button
+                  type="button"
+                  className="btn-ghost"
+                  onClick={() =>
+                    setOutreach(defaultOutreachMail(data, record?.role))
+                  }
+                >
+                  Insert template
+                </button>
+              </div>
+              <div className="field flex-1">
+                <textarea
+                  className="min-h-[240px] flex-1 resize-none text-[13px] leading-relaxed"
+                  value={outreach}
+                  onChange={(e) => setOutreach(e.target.value)}
+                  placeholder="Hi — I saw the opening…"
+                />
+              </div>
             </div>
           ) : null}
 
           {tab === "jd" ? (
-            <div className="space-y-3 p-4">
-              <p className="font-mono text-[10px] font-bold tracking-[0.14em] text-teal uppercase">
-                ■ JD match analysis
-              </p>
-              {[
-                [
-                  "About JD Match",
-                  "Side-by-side view of the job description and your resume with shared keywords highlighted.",
-                ],
-                [
-                  "Highlighted keywords",
-                  "Yellow marks mean the term appears in both the JD and your resume.",
-                ],
-                [
-                  "Tips",
-                  "Add missing skills, mirror technical terms, and reuse strong action verbs from the posting.",
-                ],
-              ].map(([t, b]) => (
-                <div
-                  key={t}
-                  className="rounded-[10px] border border-line bg-bg px-3.5 py-3"
-                >
-                  <div className="text-[12px] font-bold">{t}</div>
-                  <p className="mt-1 text-[12px] leading-relaxed text-mut">{b}</p>
+            <div className="flex h-full flex-col gap-3 p-4">
+              <div>
+                <p className="t-caption">Job description</p>
+                <p className="t-body-sm mt-1 text-[var(--text-secondary)]">
+                  Paste the posting. We extract keywords and score overlap.
+                </p>
+              </div>
+              <div className="field flex-1">
+                <textarea
+                  className="min-h-[220px] flex-1 resize-none font-mono text-[12px] leading-relaxed"
+                  value={jd}
+                  onChange={(e) => setJd(e.target.value)}
+                  placeholder="Paste the full job description here…"
+                />
+              </div>
+              <div className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface-0)] p-3">
+                <div className="flex items-baseline justify-between gap-2">
+                  <span className="t-body-sm font-medium">Match rate</span>
+                  <span
+                    className="t-h2"
+                    style={{
+                      color:
+                        match.rate >= 50
+                          ? "var(--success)"
+                          : match.rate >= 30
+                            ? "var(--warning)"
+                            : "var(--danger)",
+                    }}
+                  >
+                    {jd.trim() ? `${match.rate}%` : "—"}
+                  </span>
                 </div>
-              ))}
+                <p className="t-body-sm mt-1 text-[var(--text-muted)]">
+                  {keywords.length} keywords · {match.matches.length} found on
+                  resume
+                </p>
+              </div>
+              {match.missing.length ? (
+                <div>
+                  <p className="t-caption mb-2">Missing from resume</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {match.missing.slice(0, 24).map((k) => (
+                      <span
+                        key={k}
+                        className="rounded-[var(--radius-sm)] border border-[var(--border)] bg-white px-2 py-0.5 text-[11px] text-[var(--text-secondary)]"
+                      >
+                        {k}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+              {match.matches.length ? (
+                <div>
+                  <p className="t-caption mb-2">Matched</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {match.matches.slice(0, 24).map((k) => (
+                      <span
+                        key={k}
+                        className="rounded-[var(--radius-sm)] bg-[var(--success-bg)] px-2 py-0.5 text-[11px] text-[var(--success)]"
+                      >
+                        {k}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
             </div>
           ) : null}
         </aside>
 
-        {/* Right preview */}
-        <section className="flex min-h-0 flex-col bg-[#E6EBE9]">
-          <div className="flex border-b border-line bg-[#F4F7F6]">
-            {(
-              [
-                ["resume", "Resume"],
-                ["cover", "Cover Letter"],
-                ["outreach", "Outreach Mail"],
-                ["jd", "JD Match"],
-              ] as const
-            ).map(([k, label]) => (
-              <button
-                key={k}
-                type="button"
-                className={[
-                  "px-4 py-2.5 text-[12px] font-bold tracking-wide uppercase transition",
-                  tab === k
-                    ? "border-b-2 border-teal bg-white text-ink"
-                    : "text-mut hover:text-ink",
-                ].join(" ")}
-                onClick={() => setTab(k)}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-
-          {tab === "jd" ? (
-            <div className="border-b border-line bg-white px-4 py-2 font-mono text-[11px] text-mut">
-              {keywords.length} keywords extracted · {match.matches.length}{" "}
-              matches · Match rate:{" "}
-              <span
-                className={
-                  match.rate >= 50
-                    ? "font-bold text-green"
-                    : match.rate >= 30
-                      ? "font-bold text-amber"
-                      : "font-bold text-red"
-                }
-              >
-                {match.rate}%
-              </span>
-            </div>
-          ) : (
-            <div className="flex items-center gap-2 border-b border-line bg-white px-4 py-2">
+        <section className="flex min-h-0 flex-col">
+          {tab !== "jd" ? (
+            <div className="flex items-center gap-2 border-b border-[var(--border)] bg-[var(--surface-1)] px-4 py-2">
               <button
                 type="button"
-                className="btn ghost sm"
+                className="btn-ghost"
                 onClick={() => setZoom((z) => Math.max(0.4, z - 0.05))}
               >
                 −
               </button>
-              <span className="font-mono text-[11px]">{Math.round(zoom * 100)}%</span>
+              <span className="font-mono text-[11px] text-[var(--text-secondary)]">
+                {Math.round(zoom * 100)}%
+              </span>
               <button
                 type="button"
-                className="btn ghost sm"
+                className="btn-ghost"
                 onClick={() => setZoom((z) => Math.min(1.2, z + 0.05))}
               >
                 +
               </button>
-              <span className="ml-auto font-mono text-[10px] text-sub">
-                {fam} · {settings.pageSize} · {page.label}
+              <span className="ml-auto font-mono text-[10px] text-[var(--text-muted)]">
+                {page.label}
               </span>
             </div>
-          )}
+          ) : null}
 
           <div className="min-h-0 flex-1 overflow-auto p-5">
             {tab === "resume" ? (
               <div
-                className="mx-auto origin-top"
-                style={{
-                  width: page.w * zoom,
-                  transform: `scale(1)`,
-                }}
+                className="mx-auto"
+                style={{ width: page.w * zoom, height: page.h * zoom }}
               >
                 <div
                   style={{
@@ -484,59 +586,131 @@ export default function BuilderClient() {
               </div>
             ) : null}
 
-            {tab === "cover" || tab === "outreach" ? (
+            {tab === "cover" ? (
               <div
-                className="mx-auto bg-white shadow-[0_20px_50px_rgba(12,20,19,.12)]"
+                className="mx-auto bg-white shadow-[0_1px_2px_rgba(15,23,21,0.08),0_24px_60px_-28px_rgba(15,23,21,0.35)]"
                 style={{
                   width: page.w * zoom,
                   minHeight: page.h * zoom,
-                  padding: 40 * zoom,
+                  padding: `${28 * zoom}px ${36 * zoom}px`,
                 }}
               >
                 <div
-                  className="whitespace-pre-wrap font-[family-name:var(--serifF)] text-[13px] leading-relaxed text-ink"
-                  style={{ fontSize: 13 * zoom }}
+                  className="font-[family-name:var(--serifF)] text-[#111827]"
+                  style={{ fontSize: 11 * zoom, lineHeight: 1.55 }}
                 >
-                  <div className="mb-4 text-center font-[family-name:var(--disp)] text-xl font-bold">
+                  <div
+                    className="text-center font-bold"
+                    style={{ fontSize: 16 * zoom }}
+                  >
                     {data.name}
                   </div>
-                  <div className="mb-6 text-center font-mono text-[10px] text-mut">
-                    {[data.contact.email, data.contact.phone, data.contact.linkedin]
-                      .filter(Boolean)
-                      .join(" · ")}
+                  <div
+                    className="mt-1 text-center text-[#4b5563]"
+                    style={{ fontSize: 10 * zoom }}
+                  >
+                    {contactBits}
                   </div>
-                  {tab === "cover" ? cover : outreach}
+                  <div
+                    className="mx-auto mt-3 border-b border-[#111827]"
+                    style={{ width: "100%" }}
+                  />
+                  <p className="mt-6">{today}</p>
+                  <p className="mt-4 text-[#4b5563]">
+                    Hiring Manager
+                    {record?.company ? (
+                      <>
+                        <br />
+                        {record.company}
+                      </>
+                    ) : null}
+                  </p>
+                  <div className="mt-6 whitespace-pre-wrap">{cover}</div>
+                </div>
+              </div>
+            ) : null}
+
+            {tab === "outreach" ? (
+              <div
+                className="mx-auto overflow-hidden rounded-[12px] border border-[var(--border)] bg-white shadow-[0_1px_2px_rgba(15,23,21,0.06)]"
+                style={{ width: Math.min(640, page.w * zoom) }}
+              >
+                <div className="border-b border-[var(--border)] bg-[var(--surface-0)] px-4 py-3">
+                  <p className="t-caption">Message preview</p>
+                </div>
+                <div className="space-y-3 border-b border-[var(--border)] px-4 py-3 text-[13px]">
+                  <div className="flex gap-3">
+                    <span className="w-14 shrink-0 text-[var(--text-muted)]">
+                      To
+                    </span>
+                    <span className="text-[var(--text-secondary)]">
+                      hiring@{record?.company?.toLowerCase().replace(/\s+/g, "") || "company"}
+                      .com
+                    </span>
+                  </div>
+                  <div className="flex gap-3">
+                    <span className="w-14 shrink-0 text-[var(--text-muted)]">
+                      From
+                    </span>
+                    <span>
+                      {data.name} &lt;{data.contact.email || "you@email.com"}
+                      &gt;
+                    </span>
+                  </div>
+                  <div className="flex gap-3">
+                    <span className="w-14 shrink-0 text-[var(--text-muted)]">
+                      Subject
+                    </span>
+                    <span className="font-medium">{subject || "(no subject)"}</span>
+                  </div>
+                </div>
+                <div className="whitespace-pre-wrap px-4 py-5 text-[14px] leading-relaxed text-[var(--text-primary)]">
+                  {outreach || (
+                    <span className="text-[var(--text-muted)]">
+                      Write your outreach on the left…
+                    </span>
+                  )}
                 </div>
               </div>
             ) : null}
 
             {tab === "jd" ? (
-              <div className="grid h-full min-h-[420px] gap-3 lg:grid-cols-2">
-                <div className="overflow-auto rounded-[11px] border border-line bg-white p-4">
-                  <h3 className="mb-2 font-mono text-[10px] font-bold tracking-wider text-sub uppercase">
-                    Job description
-                  </h3>
-                  <pre className="whitespace-pre-wrap font-mono text-[11.5px] leading-relaxed text-mut">
-                    {jd || "No JD stored — tailor a resume first."}
+              <div className="mx-auto grid max-w-[1140px] gap-4 lg:grid-cols-2">
+                <div className="panel overflow-hidden p-0">
+                  <div className="border-b border-[var(--border)] px-4 py-2.5">
+                    <h3 className="t-h3">Job description</h3>
+                  </div>
+                  <pre className="max-h-[70vh] overflow-auto whitespace-pre-wrap p-4 font-mono text-[12px] leading-relaxed text-[var(--text-secondary)]">
+                    {jd.trim() ||
+                      "Paste a job description in the left panel to analyze keywords."}
                   </pre>
                 </div>
-                <div className="overflow-auto rounded-[11px] border border-line bg-white p-4">
-                  <h3 className="mb-2 font-mono text-[10px] font-bold tracking-wider text-sub uppercase">
-                    Your resume (matching keywords highlighted)
-                  </h3>
+                <div className="panel overflow-hidden p-0">
+                  <div className="border-b border-[var(--border)] px-4 py-2.5">
+                    <h3 className="t-h3">Resume overlap</h3>
+                    <p className="t-body-sm text-[var(--text-muted)]">
+                      Highlighted terms appear in both documents
+                    </p>
+                  </div>
                   <div
-                    className="font-[family-name:var(--serifF)] text-[13px] leading-relaxed [&_mark.jd-hit]:rounded [&_mark.jd-hit]:bg-[#FFF4A3] [&_mark.jd-hit]:px-0.5"
+                    className="max-h-[70vh] overflow-auto p-4 font-[family-name:var(--serifF)] text-[13px] leading-relaxed text-[#111827] [&_mark.jd-hit]:bg-[#FFF4A3] [&_mark.jd-hit]:px-0.5"
                     dangerouslySetInnerHTML={{
                       __html: highlightText(
                         [
                           data.name,
-                          data.title,
                           data.summary,
-                          ...data.exp.flatMap((e) => [
-                            `${e.role} at ${e.co}`,
-                            ...e.b.map((b) => b.t),
-                          ]),
-                          data.skills.join(", "),
+                          ...data.edu.map(
+                            (e) => `${e.role}\n${e.co}\n${e.b.map((b) => b.t).join("\n")}`,
+                          ),
+                          ...data.skills,
+                          ...data.projects.map(
+                            (e) =>
+                              `${e.role}\n${e.b.map((b) => b.t).join("\n")}`,
+                          ),
+                          ...data.exp.map(
+                            (e) =>
+                              `${e.role} at ${e.co}\n${e.b.map((b) => b.t).join("\n")}`,
+                          ),
                         ].join("\n\n"),
                         match.matches,
                       ).replace(/\n/g, "<br/>"),
@@ -548,13 +722,6 @@ export default function BuilderClient() {
           </div>
         </section>
       </div>
-
-      <footer className="flex h-8 items-center justify-between border-t border-line bg-white px-4 font-mono text-[10px] text-teal-ink">
-        <span>Resume builder module</span>
-        <span>
-          ■ {TPL_META[settings.template].name} · {settings.pageSize}
-        </span>
-      </footer>
 
       {toast ? (
         <div className="toast fixed right-4 bottom-12 z-50">{toast}</div>

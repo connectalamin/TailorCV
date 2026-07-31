@@ -148,7 +148,7 @@ export async function createApplication(payload: {
       notes: payload.notes,
       status: payload.status || "wish",
       match: 70 + Math.floor(Math.random() * 25),
-      template: payload.template || "swiss-single",
+      template: payload.template || "latex",
       dateLabel: "now",
     };
     apps = [...apps, app];

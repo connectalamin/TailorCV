@@ -8,17 +8,18 @@ import type {
   TemplateSettings,
 } from "@/lib/types/resume";
 
+/** ATS-safe LaTeX article defaults (10.5pt, letter, 0.75in margins). */
 export const DEFAULT_TEMPLATE_SETTINGS: TemplateSettings = {
-  template: "swiss-single",
-  pageSize: "A4",
-  margins: { top: 10, bottom: 10, left: 10, right: 10 },
-  sectionSpacing: 3,
+  template: "latex",
+  pageSize: "LETTER",
+  margins: { top: 19, bottom: 19, left: 19, right: 19 },
+  sectionSpacing: 2,
   itemSpacing: 2,
-  lineHeight: 3,
-  fontSize: 3,
-  headerScale: 3,
-  headerFont: "sans-serif",
-  bodyFont: "sans-serif",
+  lineHeight: 2,
+  fontSize: 1,
+  headerScale: 2,
+  headerFont: "serif",
+  bodyFont: "serif",
   compact: false,
   showContactIcons: false,
   accent: "teal",
@@ -50,8 +51,8 @@ export const TPL_META = {
     two: true,
   },
   latex: {
-    name: "LaTeX",
-    desc: "Serif · ruled headers · classic / academic",
+    name: "LaTeX ATS",
+    desc: "Single column · titlerule · ATS-safe (default)",
     fam: "latex" as const,
     two: false,
   },
@@ -83,116 +84,178 @@ export const PAGE = {
 } as const;
 
 export const SAMPLE_RESUME: ResumeData = {
-  name: "Maya Okonkwo",
-  title: "Senior Frontend Engineer",
+  name: "Al-Amin",
+  title: "Full-Stack Developer",
   summary:
-    "Frontend engineer with 8 years building design systems, editor-grade interfaces and rendering pipelines. Ships accessible, heavily-tested React & TypeScript; cares about typography, latency budgets and boring, reliable deploys.",
+    "I am a Full-Stack Developer focused on React/Next.js, Node.js, and PostgreSQL, building reliable and user-focused web applications with emphasis on scalability, performance, and usability.",
   contact: {
-    email: "maya@okonkwo.dev",
-    phone: "+49 30 555 0192",
-    linkedin: "in/maya-okonkwo",
-    github: "mayaok",
-    website: "okonkwo.dev",
+    email: "your.email@example.com",
+    phone: "+880 XXXXXXXXXX",
+    linkedin: "linkedin.com/in/yourprofile",
+    github: "github.com/yourusername",
+    location: "Dhaka, Bangladesh",
   },
-  exp: [
-    {
-      co: "Northwind Labs",
-      role: "Senior Frontend Engineer",
-      meta: "2021 — Present",
-      loc: "Berlin · Hybrid",
-      b: [
-        {
-          t: "Led rebuild of the document editor used by 40k teams; cut p95 render time from 610 ms to 180 ms via virtualization and memoized layout.",
-        },
-        {
-          t: "Built the design-token pipeline (Figma → CSS variables) now powering six product surfaces.",
-          d: "directly transferable to your design-systems roadmap.",
-        },
-        {
-          t: "Introduced Playwright component tests in CI; flaky-test rate fell from 7% to 0.4%.",
-          d: "matches your QA stack (Playwright, CI/CD).",
-        },
-        {
-          t: "Mentor five engineers; run the frontend guild and the RFC process.",
-        },
-      ],
-    },
-    {
-      co: "Helios Analytics",
-      role: "Frontend Engineer",
-      meta: "2018 — 2021",
-      loc: "Amsterdam",
-      b: [
-        {
-          t: "Shipped a real-time canvas charting engine rendering 1M-point dashboards at 60 fps.",
-        },
-        {
-          t: "Owned the accessibility program — WCAG 2.1 AA across 120 screens.",
-          d: "supports your stated WCAG 2.2 AA goal.",
-        },
-        {
-          t: "Cut bundle size 41% through route-level code-splitting and dependency audits.",
-        },
-      ],
-    },
-  ],
-  projects: [
-    {
-      co: "Inkwell",
-      role: "Open-source resume engine",
-      meta: "2.1k ★",
-      loc: "TypeScript · headless Chrome",
-      b: [
-        {
-          t: "Markdown → structured resume → pixel-perfect PDF pipeline; used by 30k+ users.",
-        },
-      ],
-    },
-  ],
+  /* Education: role=school, meta=dates, co=degree, loc=CGPA */
   edu: [
     {
-      co: "TU Berlin",
-      role: "MSc Computer Science",
-      meta: "2014 — 2016",
-      loc: "Berlin",
+      co: "B.Sc. (Eng.) in Computer Science and Engineering",
+      role: "Comilla University",
+      meta: "Jan 2022 – Present",
+      loc: "CGPA: 3.65 / 4.00",
+      b: [],
+    },
+  ],
+  exp: [
+    {
+      co: "TechLand BD — Bangladesh",
+      role: "Frontend Developer (Freelance)",
+      meta: "2025",
+      loc: "",
       b: [
         {
-          t: "Thesis: incremental layout algorithms for large documents (grade 1.3).",
+          t: "Designed and developed key frontend features for techlandbd.com, a tech e-commerce platform.",
+        },
+        {
+          t: "Built responsive UI for product browsing and smoother customer navigation.",
+        },
+        {
+          t: "Delivered production-ready interfaces with strong usability focus.",
+        },
+      ],
+    },
+    {
+      co: "Department of CSE, Comilla University — Comilla, Bangladesh",
+      role: "CSEFEST Website Developer",
+      meta: "2025",
+      loc: "",
+      b: [
+        {
+          t: "Developed the official website for CSEFEST, the flagship CSE department event.",
+        },
+        {
+          t: "Implemented registration, scheduling, and centralized event information modules.",
+        },
+        {
+          t: "Delivered a clean responsive experience for students and organizers.",
+        },
+      ],
+    },
+  ],
+  /* Projects: role=title, co=tech stack, b=description */
+  projects: [
+    {
+      co: "Next.js, React, Tailwind CSS, AI",
+      role: "Momentum (2026) — AI-Powered Planning App",
+      meta: "",
+      loc: "",
+      b: [
+        {
+          t: "AI-powered planning app for daily scheduling, academic tracking, budgeting, and analytics.",
+        },
+      ],
+    },
+    {
+      co: "React, Firebase, Tailwind CSS",
+      role: "Meditrack (2026) — Team Collaboration Hub",
+      meta: "",
+      loc: "",
+      b: [
+        {
+          t: "Workspace-focused platform with Kanban workflows, realtime chat, and team management.",
+        },
+      ],
+    },
+    {
+      co: "React, Next.js, Node.js, PostgreSQL, Prisma, Tailwind CSS",
+      role: "Code Connect (2025) — Developer Community Platform",
+      meta: "",
+      loc: "",
+      b: [
+        {
+          t: "Community platform with ranking system, security-focused architecture, and rich UI.",
+        },
+      ],
+    },
+    {
+      co: "React, PWA, NASA APIs, Chart.js",
+      role: "Stellar Tales (NASA Space Apps 2025) — Space Weather Learning PWA",
+      meta: "",
+      loc: "",
+      b: [
+        {
+          t: "Progressive web app for teaching children space weather with offline support.",
         },
       ],
     },
   ],
   skills: [
-    "React",
-    "TypeScript",
-    "GraphQL",
-    "Node.js",
-    "Next.js",
-    "Playwright",
-    "CSS architecture",
-    "Design systems",
-    "Accessibility",
-    "Storybook",
-    "CI/CD",
+    "Languages: JavaScript, TypeScript, Python, Java, C, C++, SQL",
+    "Frontend: React, Next.js, Redux Toolkit, Tailwind CSS, HTML5, CSS3",
+    "Backend: Node.js, Express, NestJS, REST API, JWT, Socket.io",
+    "Databases: PostgreSQL, MongoDB, MySQL, Redis, Prisma",
+    "AI/Data: AI Agents, MCP Servers, RAG, Pandas, NumPy, Scikit-learn",
+    "DevOps/Tools: Docker, Git, GitHub Actions, Linux, AWS, n8n, Figma",
   ],
+  /* Activities (single-column; not a second layout column) */
   langs: [
-    ["English", "Native"],
-    ["German", "C1"],
-    ["French", "A2"],
+    ["Executive Member, Creative Team — CoU IT Society", "2023 – 2025"],
+    ["Graphics Team Lead, IT Fest — CoU IT Society", "Nov 2024"],
   ],
-  certs: [["AWS Certified Developer — Associate", "2023"]],
-  awards: [["Frontend Award — Design Systems", "2024"]],
+  certs: [
+    ["Docker Foundations Professional Certificate — Docker, Inc.", "Oct 2024"],
+    ["Postman API Fundamentals Student Expert — Postman", "Nov 2024"],
+    ["Learning Docker — LinkedIn Learning", "Oct 2024"],
+    [
+      "Object Oriented Programming in Java — Coursera, UC San Diego",
+      "Mar 2022",
+    ],
+  ],
+  awards: [
+    ["Global Finalist — NASA Space Apps Challenge 2025", ""],
+    ["Ranked 11th (National Level) — SOLVIO AI Hackathon 2025", ""],
+    ["Ranked 12th out of 170+ teams — BUBT InnovateX Hackathon 2025", ""],
+    ["National Finalist — Bangladesh Blockchain Olympiad", ""],
+  ],
 };
+
+export function defaultCoverLetter(data: ResumeData, roleHint?: string): string {
+  const role = roleHint || data.title || "the open role";
+  return [
+    "Dear Hiring Manager,",
+    "",
+    `I am writing to express my interest in ${role}. ${data.summary}`,
+    "",
+    `My recent work includes ${data.projects[0]?.role || "relevant projects"}, and I am comfortable with ${data.skills
+      .slice(0, 2)
+      .join("; ")}.`,
+    "",
+    "I would welcome the chance to discuss how I can contribute to your team.",
+    "",
+    "Sincerely,",
+    data.name,
+  ].join("\n");
+}
+
+export function defaultOutreachMail(data: ResumeData, roleHint?: string): string {
+  const role = roleHint || data.title || "your opening";
+  return [
+    `Hi — I saw the ${role} posting and wanted to reach out briefly.`,
+    "",
+    `I focus on ${data.skills[0] || "relevant technical work"} and recently worked on ${data.projects[0]?.role || "related projects"}. Happy to share a tailored resume if useful.`,
+    "",
+    `— ${data.name}`,
+  ].join("\n");
+}
 
 export const SAMPLE_KEYWORDS: KeywordHit[] = [
   { k: "React", m: 96 },
-  { k: "TypeScript", m: 94 },
-  { k: "GraphQL", m: 87 },
-  { k: "design systems", m: 84 },
-  { k: "accessibility", m: 79 },
-  { k: "Playwright", m: 74 },
-  { k: "CI/CD", m: 70 },
-  { k: "mentorship", m: 64 },
+  { k: "Next.js", m: 94 },
+  { k: "Node.js", m: 90 },
+  { k: "PostgreSQL", m: 88 },
+  { k: "TypeScript", m: 86 },
+  { k: "Docker", m: 82 },
+  { k: "Prisma", m: 78 },
+  { k: "Tailwind", m: 74 },
 ];
 
 export const DEFAULT_LLM: LLMConfig = {
