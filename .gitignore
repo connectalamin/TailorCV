@@ -11,3 +11,10 @@ docs/
 .env
 .env.*
 !.env.example
+
+# Python (backend runs in Docker only — no host venv)
+**/__pycache__/
+**/*.py[cod]
+**/.venv/
+**/venv/
+apps/backend/data/

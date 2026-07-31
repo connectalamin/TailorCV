@@ -12,6 +12,7 @@ export {
   downloadResumePdf,
   fetchJobDescription,
   getMasterResumeId,
+  ensureMasterLoaded,
   getSampleResume,
 } from "@/lib/api/resume";
 export {

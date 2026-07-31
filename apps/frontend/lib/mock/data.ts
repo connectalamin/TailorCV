@@ -51,7 +51,7 @@ export const TPL_META = {
     two: true,
   },
   latex: {
-    name: "LaTeX ATS",
+    name: "LaTeX",
     desc: "Single column · titlerule · ATS-safe (default)",
     fam: "latex" as const,
     two: false,
@@ -281,6 +281,8 @@ export const SEED_APPLICATIONS: Application[] = [
     match: 92,
     template: "swiss-two-column",
     dateLabel: "2d",
+    resumeId: "master-001",
+    notes: "Recruiter screen done. Waiting on hiring manager loop.",
   },
   {
     id: "app-2",
@@ -290,6 +292,8 @@ export const SEED_APPLICATIONS: Application[] = [
     match: 90,
     template: "swiss-single",
     dateLabel: "Tue 11:00",
+    resumeId: "master-001",
+    notes: "Onsite panel Tuesday — prepare design-system war stories.",
   },
   {
     id: "app-3",
@@ -299,6 +303,7 @@ export const SEED_APPLICATIONS: Application[] = [
     match: 88,
     template: "vivid",
     dateLabel: "Thu 14:30",
+    notes: "Take-home submitted. Live coding Thursday.",
   },
   {
     id: "app-4",
@@ -308,6 +313,8 @@ export const SEED_APPLICATIONS: Application[] = [
     match: 93,
     template: "swiss-two-column",
     dateLabel: "$185k",
+    resumeId: "master-001",
+    notes: "Verbal offer. Negotiate remote + equity.",
   },
   {
     id: "app-5",
@@ -326,6 +333,7 @@ export const SEED_APPLICATIONS: Application[] = [
     match: 84,
     template: "modern",
     dateLabel: "—",
+    notes: "Watch for DX openings — strong Next.js fit.",
   },
   {
     id: "app-7",
@@ -349,6 +357,11 @@ export const SEED_APPLICATIONS: Application[] = [
 
 export const PROVIDER_INFO = {
   openai: { name: "OpenAI", defaultModel: "gpt-4o-mini", requiresKey: true },
+  openai_compatible: {
+    name: "OpenAI Compatible",
+    defaultModel: "gpt-4o-mini",
+    requiresKey: true,
+  },
   anthropic: {
     name: "Anthropic",
     defaultModel: "claude-haiku-4-5-20251001",

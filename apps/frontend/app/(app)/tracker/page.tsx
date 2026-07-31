@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import {
   useCallback,
   useEffect,
@@ -8,18 +9,20 @@ import {
   useState,
   type DragEvent,
 } from "react";
+import { toast } from "sonner";
 import {
   createApplication,
+  deleteApplication,
   listApplications,
   updateApplication,
 } from "@/lib/api";
 import type { Application, ApplicationStatus } from "@/lib/types/resume";
 
 const KCOLS: { id: ApplicationStatus; name: string; c: string }[] = [
-  { id: "wish", name: "Wishlist", c: "#8B9591" },
-  { id: "applied", name: "Applied", c: "#2563EB" },
-  { id: "interview", name: "Interview", c: "#D97706" },
-  { id: "offer", name: "Offer", c: "#0D9488" },
+  { id: "wish", name: "Wishlist", c: "#8A8A8A" },
+  { id: "applied", name: "Applied", c: "#00BFFF" },
+  { id: "interview", name: "Interview", c: "#E8A317" },
+  { id: "offer", name: "Offer", c: "#76B900" },
 ];
 
 function matchCls(m: number) {
@@ -28,11 +31,26 @@ function matchCls(m: number) {
   return "lo";
 }
 
-function pushToast(setToasts: (fn: (t: string[]) => string[]) => void, msg: string) {
-  setToasts((t) => [...t, msg]);
-  setTimeout(() => {
-    setToasts((t) => t.slice(1));
-  }, 3400);
+function templateTagCls(template?: string) {
+  const t = (template || "latex").toLowerCase();
+  switch (t) {
+    case "latex":
+      return "ktag-latex";
+    case "swiss-single":
+      return "ktag-swiss";
+    case "swiss-two-column":
+      return "ktag-swiss2";
+    case "modern":
+      return "ktag-modern";
+    case "modern-two-column":
+      return "ktag-modern2";
+    case "clean":
+      return "ktag-clean";
+    case "vivid":
+      return "ktag-vivid";
+    default:
+      return "ktag-default";
+  }
 }
 
 export default function TrackerPage() {
@@ -41,9 +59,15 @@ export default function TrackerPage() {
   const [company, setCompany] = useState("");
   const [role, setRole] = useState("");
   const [col, setCol] = useState<ApplicationStatus>("applied");
-  const [toasts, setToasts] = useState<string[]>([]);
   const [dragOver, setDragOver] = useState<ApplicationStatus | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [draftCompany, setDraftCompany] = useState("");
+  const [draftRole, setDraftRole] = useState("");
+  const [draftStatus, setDraftStatus] = useState<ApplicationStatus>("wish");
+  const [draftNotes, setDraftNotes] = useState("");
+  const [saving, setSaving] = useState(false);
   const dragId = useRef<string | null>(null);
+  const skipClick = useRef(false);
   const popRef = useRef<HTMLDivElement>(null);
 
   const load = useCallback(async () => {
@@ -67,6 +91,14 @@ export default function TrackerPage() {
     return () => document.removeEventListener("click", onDoc);
   }, [open]);
 
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") setSelectedId(null);
+    }
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, []);
+
   const stats = useMemo(() => {
     const total = apps.length;
     const interviews = apps.filter((a) => a.status === "interview").length;
@@ -78,6 +110,20 @@ export default function TrackerPage() {
     return { total, interviews, offers, avg };
   }, [apps]);
 
+  const selected = useMemo(
+    () => apps.find((a) => a.id === selectedId) ?? null,
+    [apps, selectedId],
+  );
+
+  function openDetail(app: Application) {
+    setSelectedId(app.id);
+    setDraftCompany(app.company);
+    setDraftRole(app.role);
+    setDraftStatus(app.status);
+    setDraftNotes(app.notes ?? "");
+    setOpen(false);
+  }
+
   async function onCreate() {
     const c = company.trim() || "Untitled Co";
     const r = role.trim() || "Frontend Engineer";
@@ -86,10 +132,11 @@ export default function TrackerPage() {
     setRole("");
     setOpen(false);
     await load();
-    pushToast(setToasts, `${c} added to ${KCOLS.find((x) => x.id === col)?.name}`);
+    toast.success(`${c} added to ${KCOLS.find((x) => x.id === col)?.name}`);
   }
 
   function onDragStart(id: string) {
+    skipClick.current = true;
     dragId.current = id;
   }
 
@@ -102,19 +149,42 @@ export default function TrackerPage() {
     if (!app || app.status === to) return;
     await updateApplication(id, { status: to });
     await load();
-    pushToast(
-      setToasts,
-      `${app.company} → ${KCOLS.find((c) => c.id === to)?.name}`,
-    );
+    if (selectedId === id) setDraftStatus(to);
+    toast.message(`${app.company} → ${KCOLS.find((c) => c.id === to)?.name}`);
+  }
+
+  async function onSaveDetail() {
+    if (!selected) return;
+    setSaving(true);
+    try {
+      await updateApplication(selected.id, {
+        company: draftCompany.trim() || selected.company,
+        role: draftRole.trim() || selected.role,
+        status: draftStatus,
+        notes: draftNotes,
+      });
+      await load();
+      toast.success("Application updated");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function onDeleteDetail() {
+    if (!selected) return;
+    const label = selected.company;
+    await deleteApplication(selected.id);
+    setSelectedId(null);
+    await load();
+    toast.success(`${label} removed`);
   }
 
   return (
     <div className="apps-view">
       <div className="apps-head">
         <div>
-          <h1 className="apps-title">Applications</h1>
           <p className="apps-sub">
-            Kanban synced with the backend · drag cards between stages
+            Drag between stages · click a card for details
           </p>
         </div>
         <div className="stats">
@@ -137,9 +207,8 @@ export default function TrackerPage() {
         </div>
         <button
           type="button"
-          className="btn prime"
+          className="btn btn-primary"
           id="newAppBtn"
-          style={{ padding: "10px 16px" }}
           onClick={(e) => {
             e.stopPropagation();
             setOpen((v) => !v);
@@ -180,27 +249,49 @@ export default function TrackerPage() {
                 {cards.map((a, i) => (
                   <article
                     key={a.id}
-                    className="kcard"
+                    className={[
+                      "kcard",
+                      selectedId === a.id ? "is-open" : "",
+                    ].join(" ")}
                     draggable
                     onDragStart={() => onDragStart(a.id)}
                     onDragEnd={() => {
                       dragId.current = null;
                       setDragOver(null);
+                      window.setTimeout(() => {
+                        skipClick.current = false;
+                      }, 0);
                     }}
+                    onClick={() => {
+                      if (skipClick.current) return;
+                      openDetail(a);
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        openDetail(a);
+                      }
+                    }}
+                    role="button"
+                    tabIndex={0}
                     style={{
                       animation: `rise .4s ${i * 45}ms ease both`,
                     }}
                   >
                     <div className="kc-top">
                       <b>{a.company}</b>
-                      <span className="kc-grip">⋮⋮</span>
+                      <span className="kc-grip" aria-hidden>
+                        ⋮⋮
+                      </span>
                     </div>
                     <p>{a.role}</p>
                     <div className="kc-meta">
                       <span className={`match ${matchCls(a.match ?? 0)}`}>
                         {a.match ?? 0}%
                       </span>
-                      <span className="ktag">{a.template || "swiss-single"}</span>
+                      <span className={`ktag ${templateTagCls(a.template)}`}>
+                        {a.template || "latex"}
+                      </span>
                       <span className="kdate">{a.dateLabel || "—"}</span>
                     </div>
                   </article>
@@ -238,7 +329,7 @@ export default function TrackerPage() {
           </select>
           <button
             type="button"
-            className="btn prime"
+            className="btn btn-primary"
             style={{ width: "100%" }}
             onClick={() => void onCreate()}
           >
@@ -247,13 +338,130 @@ export default function TrackerPage() {
         </div>
       ) : null}
 
-      <div className="toasts" aria-live="polite">
-        {toasts.map((t, i) => (
-          <div key={`${t}-${i}`} className="toast">
-            {t}
-          </div>
-        ))}
-      </div>
+      {selected ? (
+        <>
+          <button
+            type="button"
+            className="app-drawer-backdrop"
+            aria-label="Close application details"
+            onClick={() => setSelectedId(null)}
+          />
+          <aside className="app-drawer" role="dialog" aria-modal="true" aria-labelledby="app-drawer-title">
+            <header className="app-drawer-head">
+              <div>
+                <p className="t-caption text-[var(--accent)]">Application</p>
+                <h2 id="app-drawer-title" className="t-h2">
+                  {selected.company}
+                </h2>
+              </div>
+              <button
+                type="button"
+                className="btn btn-ghost"
+                onClick={() => setSelectedId(null)}
+              >
+                Close
+              </button>
+            </header>
+
+            <div className="app-drawer-body">
+              <div className="app-drawer-chips">
+                <span className={`match ${matchCls(selected.match ?? 0)}`}>
+                  {selected.match ?? 0}% match
+                </span>
+                <span className={`ktag ${templateTagCls(selected.template)}`}>
+                  {selected.template || "latex"}
+                </span>
+                <span className="kdate">{selected.dateLabel || "—"}</span>
+              </div>
+
+              <div className="field">
+                <label htmlFor="app-company">Company</label>
+                <input
+                  id="app-company"
+                  value={draftCompany}
+                  onChange={(e) => setDraftCompany(e.target.value)}
+                />
+              </div>
+              <div className="field">
+                <label htmlFor="app-role">Role</label>
+                <input
+                  id="app-role"
+                  value={draftRole}
+                  onChange={(e) => setDraftRole(e.target.value)}
+                />
+              </div>
+              <div className="field">
+                <label htmlFor="app-status">Stage</label>
+                <select
+                  id="app-status"
+                  value={draftStatus}
+                  onChange={(e) =>
+                    setDraftStatus(e.target.value as ApplicationStatus)
+                  }
+                >
+                  {KCOLS.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="field">
+                <label htmlFor="app-notes">Notes</label>
+                <textarea
+                  id="app-notes"
+                  rows={5}
+                  placeholder="Interview notes, contacts, follow-ups…"
+                  value={draftNotes}
+                  onChange={(e) => setDraftNotes(e.target.value)}
+                />
+              </div>
+            </div>
+
+            <footer className="app-drawer-foot">
+              <div className="app-drawer-links">
+                {selected.resumeId ? (
+                  <>
+                    <Link
+                      href={`/builder?id=${selected.resumeId}`}
+                      className="btn btn-secondary no-underline"
+                    >
+                      Open in builder
+                    </Link>
+                    <Link
+                      href={`/resumes/${selected.resumeId}`}
+                      className="btn btn-ghost no-underline"
+                    >
+                      View resume
+                    </Link>
+                  </>
+                ) : (
+                  <Link href="/tailor" className="btn btn-secondary no-underline">
+                    Tailor a resume
+                  </Link>
+                )}
+              </div>
+              <div className="app-drawer-actions">
+                <button
+                  type="button"
+                  className="btn btn-danger"
+                  onClick={() => void onDeleteDetail()}
+                >
+                  Delete
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  disabled={saving}
+                  onClick={() => void onSaveDetail()}
+                >
+                  {saving ? "Saving…" : "Save"}
+                </button>
+              </div>
+            </footer>
+          </aside>
+        </>
+      ) : null}
     </div>
   );
 }

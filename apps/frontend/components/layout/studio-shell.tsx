@@ -45,29 +45,19 @@ const NAV = [
   },
 ] as const;
 
-function pageMeta(pathname: string): { eyebrow: string; title: string } {
-  if (pathname.startsWith("/settings")) {
-    return { eyebrow: "Workspace", title: "Settings" };
-  }
-  if (pathname.startsWith("/tracker")) {
-    return { eyebrow: "Pipeline", title: "Applications" };
-  }
-  if (pathname.startsWith("/tailor")) {
-    return { eyebrow: "Workflow", title: "Tailor resume" };
-  }
-  if (pathname.startsWith("/builder")) {
-    return { eyebrow: "Workflow", title: "Resume builder" };
-  }
-  if (pathname.startsWith("/resumes")) {
-    return { eyebrow: "Resume", title: "Resume" };
-  }
-  return { eyebrow: "Overview", title: "Dashboard" };
+function pageTitle(pathname: string): string {
+  if (pathname.startsWith("/settings")) return "Settings";
+  if (pathname.startsWith("/tracker")) return "Applications";
+  if (pathname.startsWith("/tailor")) return "Tailor resume";
+  if (pathname.startsWith("/builder")) return "Resume builder";
+  if (pathname.startsWith("/resumes")) return "Resume";
+  return "Dashboard";
 }
 
 export function StudioShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(false);
-  const meta = useMemo(() => pageMeta(pathname), [pathname]);
+  const title = useMemo(() => pageTitle(pathname), [pathname]);
 
   useEffect(() => {
     try {
@@ -94,8 +84,8 @@ export function StudioShell({ children }: { children: ReactNode }) {
       <aside className={["app-sidebar", collapsed ? "collapsed" : ""].join(" ")}>
         <Link href="/dashboard" className="brand flex items-center gap-2.5 px-4 pt-5 pb-5 no-underline">
           <span
-            className="grid h-8 w-8 place-items-center rounded-[var(--radius-md)]"
-            style={{ background: "var(--accent)", color: "#fff" }}
+            className="grid h-8 w-8 place-items-center rounded-[var(--radius-sm)]"
+            style={{ background: "var(--deep)", color: "#fff" }}
           >
             <svg viewBox="0 0 24 24" className="h-4 w-4" fill="currentColor">
               <path d="M6 3h9l3 3v15a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1zm8 1.5V8h3.5" />
@@ -182,8 +172,7 @@ export function StudioShell({ children }: { children: ReactNode }) {
         {!hideTopbar ? (
           <header className="app-topbar">
             <div className="min-w-0">
-              <p className="t-caption text-[var(--accent)]">{meta.eyebrow}</p>
-              <h1 className="t-h1 truncate text-[var(--text-primary)]">{meta.title}</h1>
+              <h1 className="t-h1 truncate text-[var(--text-primary)]">{title}</h1>
             </div>
           </header>
         ) : null}

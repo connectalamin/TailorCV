@@ -1,4 +1,5 @@
-import { delay, USE_MOCK_API } from "@/lib/api/client";
+import { API_URL, delay, USE_MOCK_API } from "@/lib/api/client";
+import { formFetch, jsonFetch } from "@/lib/api/http";
 import {
   SAMPLE_KEYWORDS,
   SAMPLE_RESUME,
@@ -15,6 +16,7 @@ import type {
 
 let resumes: ResumeRecord[] = [];
 let lastPreviewHash: string | null = null;
+let cachedMaster: string | null = null;
 
 const ALLOWED = [".pdf", ".docx", ".tex", ".txt", ".md"];
 
@@ -63,7 +65,9 @@ export async function uploadMasterResume(file: File): Promise<ResumeRecord> {
     persist();
     return structuredClone(record);
   }
-  throw new Error("Live upload requires backend");
+  const form = new FormData();
+  form.append("file", file);
+  return formFetch<ResumeRecord>("/resumes/upload", form);
 }
 
 export async function fetchResumeList(
@@ -72,11 +76,19 @@ export async function fetchResumeList(
   if (USE_MOCK_API) {
     await delay(200);
     ensureLoaded();
-    return resumes
+    const out = resumes
       .filter((r) => includeMaster || !r.isMaster)
       .map(({ data: _d, ...item }) => item);
+    const m = out.find((r) => r.isMaster);
+    if (m) cachedMaster = m.id;
+    return out;
   }
-  throw new Error("Backend not connected");
+  const list = await jsonFetch<ResumeListItem[]>(
+    `/resumes?include_master=${includeMaster}`,
+  );
+  const m = list.find((r) => r.isMaster);
+  if (m) cachedMaster = m.id;
+  return list;
 }
 
 export async function fetchResume(id: string): Promise<ResumeRecord> {
@@ -87,7 +99,7 @@ export async function fetchResume(id: string): Promise<ResumeRecord> {
     if (!found) throw new Error("Resume not found");
     return structuredClone(found);
   }
-  throw new Error("Backend not connected");
+  return jsonFetch<ResumeRecord>(`/resumes/${encodeURIComponent(id)}`);
 }
 
 export async function deleteResume(id: string): Promise<void> {
@@ -101,7 +113,10 @@ export async function deleteResume(id: string): Promise<void> {
     }
     return;
   }
-  throw new Error("Backend not connected");
+  await jsonFetch<void>(`/resumes/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
+  if (id === cachedMaster) cachedMaster = null;
 }
 
 export async function uploadJobDescriptions(
@@ -114,7 +129,10 @@ export async function uploadJobDescriptions(
     void resumeId;
     return { job_id: `job-${Date.now()}` };
   }
-  throw new Error("Backend not connected");
+  return jsonFetch<{ job_id: string }>("/jobs", {
+    method: "POST",
+    body: JSON.stringify({ descriptions, resume_id: resumeId }),
+  });
 }
 
 export async function analyzeJob(jd: string): Promise<KeywordHit[]> {
@@ -123,7 +141,10 @@ export async function analyzeJob(jd: string): Promise<KeywordHit[]> {
     void jd;
     return structuredClone(SAMPLE_KEYWORDS);
   }
-  throw new Error("Backend not connected");
+  return jsonFetch<KeywordHit[]>("/jobs/analyze", {
+    method: "POST",
+    body: JSON.stringify({ jd }),
+  });
 }
 
 export async function improveResume(
@@ -176,7 +197,15 @@ export async function improveResume(
       outreach_message: outreachMessage,
     };
   }
-  throw new Error("Backend not connected");
+  return jsonFetch<{
+    resume_id: string;
+    preview_hash: string;
+    cover_letter: string;
+    outreach_message: string;
+  }>(`/resumes/${encodeURIComponent(resumeId)}/improve`, {
+    method: "POST",
+    body: JSON.stringify({ job_id: jobId, jd: jdText ?? "" }),
+  });
 }
 
 export async function updateResume(
@@ -201,7 +230,10 @@ export async function updateResume(
     persist();
     return structuredClone(resumes[idx]);
   }
-  throw new Error("Backend not connected");
+  return jsonFetch<ResumeRecord>(`/resumes/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    body: JSON.stringify(patch),
+  });
 }
 
 export async function fetchJobDescription(
@@ -212,7 +244,7 @@ export async function fetchJobDescription(
     ensureLoaded();
     return resumes.find((r) => r.id === resumeId)?.jobDescription ?? null;
   }
-  throw new Error("Backend not connected");
+  return jsonFetch<string | null>(`/resumes/${encodeURIComponent(resumeId)}/jd`);
 }
 
 export async function confirmTailor(
@@ -227,15 +259,27 @@ export async function confirmTailor(
     void resumeId;
     return;
   }
-  throw new Error("Backend not connected");
+  await jsonFetch<void>(`/resumes/${encodeURIComponent(resumeId)}/confirm`, {
+    method: "POST",
+    body: JSON.stringify({ preview_hash: previewHash }),
+  });
 }
 
 export async function downloadResumePdf(resumeId: string): Promise<Blob> {
-  ensureLoaded();
-  const record = resumes.find((r) => r.id === resumeId);
+  let record: ResumeRecord | undefined;
+  if (USE_MOCK_API) {
+    ensureLoaded();
+    record = resumes.find((r) => r.id === resumeId);
+  } else {
+    try {
+      record = await fetchResume(resumeId);
+    } catch {
+      record = undefined;
+    }
+  }
   if (!record) throw new Error("Resume not found");
 
-  const res = await fetch("/api/compile-resume", {
+  const res = await fetch(`${API_URL}/api/compile-resume`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -249,8 +293,9 @@ export async function downloadResumePdf(resumeId: string): Promise<Blob> {
   if (!res.ok) {
     let detail = `PDF compile failed (${res.status})`;
     try {
-      const j = (await res.json()) as { error?: string };
+      const j = (await res.json()) as { error?: string; detail?: string };
       if (j.error) detail = j.error;
+      else if (typeof j.detail === "string" && j.detail) detail = j.detail;
     } catch {
       /* ignore */
     }
@@ -261,6 +306,7 @@ export async function downloadResumePdf(resumeId: string): Promise<Blob> {
 }
 
 export function getMasterResumeId(): string | null {
+  if (cachedMaster) return cachedMaster;
   if (typeof window === "undefined") return null;
   ensureLoaded();
   return (
@@ -268,6 +314,21 @@ export function getMasterResumeId(): string | null {
     resumes.find((r) => r.isMaster)?.id ||
     null
   );
+}
+
+export async function ensureMasterLoaded(): Promise<void> {
+  if (USE_MOCK_API) {
+    ensureLoaded();
+    return;
+  }
+  if (cachedMaster) return;
+  try {
+    const list = await fetchResumeList(true);
+    const m = list.find((r) => r.isMaster);
+    if (m) cachedMaster = m.id;
+  } catch {
+    /* ignore */
+  }
 }
 
 export function getSampleResume(): ResumeData {

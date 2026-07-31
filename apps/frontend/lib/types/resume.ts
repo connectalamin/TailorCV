@@ -103,6 +103,7 @@ export type Application = {
 
 export type LLMProvider =
   | "openai"
+  | "openai_compatible"
   | "anthropic"
   | "openrouter"
   | "gemini"

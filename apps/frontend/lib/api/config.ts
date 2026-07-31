@@ -1,4 +1,5 @@
 import { delay, USE_MOCK_API } from "@/lib/api/client";
+import { jsonFetch } from "@/lib/api/http";
 import {
   DEFAULT_LLM,
   DEFAULT_STATUS,
@@ -58,7 +59,7 @@ export async function fetchLlmConfig(): Promise<LLMConfig> {
     await delay(150);
     return { ...llm };
   }
-  throw new Error("Backend not connected");
+  return jsonFetch<LLMConfig>("/llm");
 }
 
 export async function updateLlmConfig(
@@ -77,10 +78,15 @@ export async function updateLlmConfig(
     }
     return { ...llm };
   }
-  throw new Error("Backend not connected");
+  return jsonFetch<LLMConfig>("/llm", {
+    method: "PUT",
+    body: JSON.stringify(update),
+  });
 }
 
-export async function testLlmConnection(): Promise<{
+export async function testLlmConnection(
+  update?: Partial<LLMConfig> & { apiKey?: string },
+): Promise<{
   ok: boolean;
   message: string;
 }> {
@@ -91,7 +97,10 @@ export async function testLlmConnection(): Promise<{
     }
     return { ok: true, message: "Mock connection OK" };
   }
-  throw new Error("Backend not connected");
+  return jsonFetch<{ ok: boolean; message: string }>("/llm/test", {
+    method: "POST",
+    body: JSON.stringify(update ?? {}),
+  });
 }
 
 export async function fetchSystemStatus(): Promise<SystemStatus> {
@@ -110,7 +119,7 @@ export async function fetchSystemStatus(): Promise<SystemStatus> {
       lastChecked: new Date().toISOString(),
     };
   }
-  throw new Error("Backend not connected");
+  return jsonFetch<SystemStatus>("/status");
 }
 
 export async function listApplications(): Promise<
@@ -128,7 +137,7 @@ export async function listApplications(): Promise<
     for (const app of apps) columns[app.status].push(app);
     return columns;
   }
-  throw new Error("Backend not connected");
+  return jsonFetch<Record<ApplicationStatus, Application[]>>("/applications");
 }
 
 export async function createApplication(payload: {
@@ -155,7 +164,10 @@ export async function createApplication(payload: {
     persistApps();
     return app;
   }
-  throw new Error("Backend not connected");
+  return jsonFetch<Application>("/applications", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
 }
 
 export async function updateApplication(
@@ -171,7 +183,10 @@ export async function updateApplication(
     if (!found) throw new Error("Not found");
     return found;
   }
-  throw new Error("Backend not connected");
+  return jsonFetch<Application>(`/applications/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
 }
 
 export async function deleteApplication(id: string): Promise<void> {
@@ -182,7 +197,9 @@ export async function deleteApplication(id: string): Promise<void> {
     persistApps();
     return;
   }
-  throw new Error("Backend not connected");
+  await jsonFetch<void>(`/applications/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
 }
 
 export function providerList(): LLMProvider[] {

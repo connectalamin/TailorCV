@@ -1,23 +1,7 @@
 import type { Metadata } from "next";
-import {
-  Inter,
-  Space_Grotesk,
-  Source_Serif_4,
-  JetBrains_Mono,
-} from "next/font/google";
+import { JetBrains_Mono, Source_Serif_4 } from "next/font/google";
+import { Toaster } from "sonner";
 import "./globals.css";
-
-const inter = Inter({
-  subsets: ["latin"],
-  variable: "--font-inter",
-  display: "swap",
-});
-
-const space = Space_Grotesk({
-  subsets: ["latin"],
-  variable: "--font-space",
-  display: "swap",
-});
 
 const serif = Source_Serif_4({
   subsets: ["latin"],
@@ -42,10 +26,19 @@ export default function RootLayout({
 }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="en">
-      <body
-        className={`${inter.variable} ${space.variable} ${serif.variable} ${mono.variable} antialiased`}
-      >
+      <body className={`${serif.variable} ${mono.variable} antialiased`}>
         {children}
+        <Toaster
+          theme="dark"
+          position="bottom-right"
+          richColors
+          closeButton
+          duration={3200}
+          visibleToasts={4}
+          toastOptions={{
+            className: "tailor-toast",
+          }}
+        />
       </body>
     </html>
   );

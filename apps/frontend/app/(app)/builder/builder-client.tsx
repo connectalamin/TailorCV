@@ -2,8 +2,17 @@
 
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type PointerEvent as ReactPointerEvent,
+} from "react";
 import { ResumePreview } from "@/components/resume/resume-preview";
+import { JdOverlapResume } from "@/components/resume/jd-overlap-resume";
 import {
   downloadResumePdf,
   fetchResume,
@@ -25,15 +34,19 @@ import type {
 } from "@/lib/types/resume";
 import {
   extractKeywords,
-  highlightText,
   matchKeywords,
   resumeToPlainText,
 } from "@/lib/utils/keyword-matcher";
+import { toast } from "sonner";
 
 type DocTab = "resume" | "cover" | "outreach" | "jd";
 
 const SETTINGS_KEY = "resume_builder_settings";
 const DRAFT_KEY = "resume_builder_draft";
+const PANEL_W_KEY = "resume_builder_panel_w";
+const PANEL_W_DEFAULT = 360;
+const PANEL_W_MIN = 280;
+const PANEL_W_MAX = 560;
 
 const DOC_TABS: { id: DocTab; label: string }[] = [
   { id: "resume", label: "Resume" },
@@ -60,6 +73,128 @@ function wordCount(s: string) {
   return s.trim().split(/\s+/).filter(Boolean).length;
 }
 
+function TplThumb({ tid }: { tid: TemplateId }) {
+  const L = ({ w, d = false, cls = "" }: { w: string; d?: boolean; cls?: string }) => (
+    <i
+      className={`block h-[2px] rounded-full ${d ? "bg-[#4a4a46]" : "bg-[#ddd9d2]"} ${cls}`}
+      style={{ width: w }}
+    />
+  );
+  const R = () => <i className="block h-px w-full bg-[#1a1a18]" />;
+  const hair = <i className="block h-px w-full bg-[#e2ded6]" />;
+
+  switch (tid) {
+    case "latex":
+      return (
+        <>
+          <L w="46%" d cls="mx-auto h-[3px]" />
+          <L w="64%" cls="mx-auto" />
+          <div className="mt-[2px] flex flex-col gap-[3px]">
+            <R />
+            <L w="88%" />
+            <L w="66%" />
+            <R />
+            <L w="78%" />
+            <L w="52%" />
+          </div>
+        </>
+      );
+    case "swiss-single":
+      return (
+        <>
+          <L w="50%" d cls="h-[3px]" />
+          {hair}
+          <L w="34%" d />
+          <L w="90%" />
+          <L w="72%" />
+          <L w="34%" d cls="mt-[2px]" />
+          <L w="84%" />
+        </>
+      );
+    case "swiss-two-column":
+      return (
+        <div className="flex flex-1 gap-[4px]">
+          <div className="flex flex-[2] flex-col gap-[3px]">
+            <L w="60%" d />
+            <L w="100%" />
+            <L w="86%" />
+            <L w="92%" />
+            <L w="70%" />
+          </div>
+          <div className="flex flex-1 flex-col gap-[3px] border-l border-[#e2ded6] pl-[4px]">
+            <L w="90%" />
+            <L w="70%" />
+            <L w="84%" />
+          </div>
+        </div>
+      );
+    case "modern":
+      return (
+        <>
+          <div className="flex items-center gap-[3px]">
+            <i className="block h-[10px] w-[2.5px] rounded-full bg-[#1a1a18]" />
+            <L w="42%" d cls="h-[3px]" />
+          </div>
+          <L w="88%" />
+          <L w="74%" />
+          <div className="mt-[2px] flex items-center gap-[4px]">
+            <L w="26%" d />
+            <i className="block h-px flex-1 bg-[#e2ded6]" />
+          </div>
+          <L w="82%" />
+        </>
+      );
+    case "modern-two-column":
+      return (
+        <>
+          <div className="flex items-center gap-[3px]">
+            <i className="block h-[9px] w-[2.5px] rounded-full bg-[#1a1a18]" />
+            <L w="38%" d cls="h-[3px]" />
+          </div>
+          <div className="flex flex-1 gap-[4px]">
+            <div className="flex flex-[2] flex-col gap-[3px]">
+              <L w="96%" />
+              <L w="82%" />
+              <L w="90%" />
+            </div>
+            <div className="flex flex-1 flex-col gap-[3px] border-l border-[#e2ded6] pl-[4px]">
+              <L w="88%" />
+              <L w="66%" />
+            </div>
+          </div>
+        </>
+      );
+    case "clean":
+      return (
+        <>
+          <L w="44%" d cls="h-[3px]" />
+          <L w="30%" />
+          <L w="24%" d cls="mt-[5px]" />
+          <L w="90%" />
+          <L w="64%" />
+        </>
+      );
+    case "vivid":
+      return (
+        <div className="flex flex-1 gap-[4px]">
+          <div className="flex flex-[35] flex-col gap-[3px] border-r border-[#e2ded6] pr-[4px]">
+            <i className="block h-[3px] w-[80%] rounded-full bg-[var(--accent)]" />
+            <L w="90%" />
+            <L w="68%" />
+          </div>
+          <div className="flex flex-[65] flex-col gap-[3px]">
+            <L w="70%" d />
+            <L w="94%" />
+            <L w="80%" />
+            <L w="88%" />
+          </div>
+        </div>
+      );
+    default:
+      return null;
+  }
+}
+
 export default function BuilderClient() {
   const params = useSearchParams();
   const [tab, setTab] = useState<DocTab>("resume");
@@ -74,7 +209,11 @@ export default function BuilderClient() {
   const [jd, setJd] = useState("");
   const [zoom, setZoom] = useState(0.78);
   const [busy, setBusy] = useState(false);
-  const [toast, setToast] = useState<string | null>(null);
+  const [pages, setPages] = useState(1);
+  const [panelW, setPanelW] = useState(PANEL_W_DEFAULT);
+  const sheetRef = useRef<HTMLDivElement>(null);
+  const canvasRef = useRef<HTMLDivElement>(null);
+  const panelWRef = useRef(PANEL_W_DEFAULT);
 
   const id = params.get("id");
 
@@ -113,6 +252,22 @@ export default function BuilderClient() {
   }, [load]);
 
   useEffect(() => {
+    try {
+      const raw = localStorage.getItem(PANEL_W_KEY);
+      if (raw) {
+        const n = Number(raw);
+        if (Number.isFinite(n)) {
+          const w = Math.min(PANEL_W_MAX, Math.max(PANEL_W_MIN, n));
+          setPanelW(w);
+          panelWRef.current = w;
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  useEffect(() => {
     localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
   }, [settings]);
 
@@ -135,7 +290,7 @@ export default function BuilderClient() {
 
   async function onSave() {
     if (!id) {
-      setToast("Open a resume from Dashboard to save");
+      toast.message("Open a resume from Dashboard to save");
       return;
     }
     setBusy(true);
@@ -147,9 +302,9 @@ export default function BuilderClient() {
         jobDescription: jd || undefined,
       });
       setRecord(next);
-      setToast("Saved");
+      toast.success("Saved");
     } catch (e) {
-      setToast(e instanceof Error ? e.message : "Save failed");
+      toast.error(e instanceof Error ? e.message : "Save failed");
     } finally {
       setBusy(false);
     }
@@ -166,18 +321,13 @@ export default function BuilderClient() {
       a.download = `${data.name.replace(/\s+/g, "_")}.pdf`;
       a.click();
       URL.revokeObjectURL(url);
+      toast.success("PDF downloaded");
     } catch (e) {
-      setToast(e instanceof Error ? e.message : "Download failed");
+      toast.error(e instanceof Error ? e.message : "Download failed");
     } finally {
       setBusy(false);
     }
   }
-
-  useEffect(() => {
-    if (!toast) return;
-    const t = setTimeout(() => setToast(null), 2500);
-    return () => clearTimeout(t);
-  }, [toast]);
 
   const page = PAGE[settings.pageSize];
   const today = new Date().toLocaleDateString("en-US", {
@@ -185,6 +335,53 @@ export default function BuilderClient() {
     month: "long",
     day: "numeric",
   });
+
+  useLayoutEffect(() => {
+    if (tab !== "resume") return;
+    const el = sheetRef.current?.querySelector<HTMLElement>(".resume-print");
+    if (!el) return;
+    setPages(Math.max(1, Math.ceil((el.offsetHeight - 2) / page.h)));
+  }, [data, settings, tab, page.h]);
+
+  function fitZoom() {
+    const w = canvasRef.current?.clientWidth ?? page.w + 80;
+    setZoom(Math.min(1.2, Math.max(0.4, (w - 56) / page.w)));
+  }
+
+  function onPanelResizeStart(e: ReactPointerEvent<HTMLDivElement>) {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startW = panelWRef.current;
+    const target = e.currentTarget;
+    target.setPointerCapture(e.pointerId);
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+
+    function onMove(ev: PointerEvent) {
+      const next = Math.min(
+        PANEL_W_MAX,
+        Math.max(PANEL_W_MIN, startW + (ev.clientX - startX)),
+      );
+      panelWRef.current = next;
+      setPanelW(next);
+    }
+
+    function onUp() {
+      target.releasePointerCapture(e.pointerId);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      target.removeEventListener("pointermove", onMove);
+      target.removeEventListener("pointerup", onUp);
+      try {
+        localStorage.setItem(PANEL_W_KEY, String(panelWRef.current));
+      } catch {
+        /* ignore */
+      }
+    }
+
+    target.addEventListener("pointermove", onMove);
+    target.addEventListener("pointerup", onUp);
+  }
 
   const contactBits = [
     data.contact.location,
@@ -196,13 +393,13 @@ export default function BuilderClient() {
     .join("  ·  ");
 
   const docTitle =
+    (data.name ? data.name : null) ||
     record?.title ||
     (record?.role ? record.role : null) ||
-    data.name ||
     "Untitled resume";
 
   const docSub = [
-    data.name,
+    record?.title && record.title !== data.name ? record.title : null,
     TPL_META[settings.template].name,
     settings.pageSize === "LETTER" ? "US Letter" : "A4",
   ]
@@ -231,17 +428,17 @@ export default function BuilderClient() {
         <div className="builder-topbar-actions">
           <button
             type="button"
-            className="btn-ghost"
+            className="btn btn-ghost"
             onClick={() => {
               setSettings(structuredClone(DEFAULT_TEMPLATE_SETTINGS));
-              setToast("Reset to LaTeX ATS defaults");
+              toast.message("Reset to LaTeX defaults");
             }}
           >
             Reset
           </button>
           <button
             type="button"
-            className="btn-secondary"
+            className="btn btn-secondary"
             disabled={busy}
             onClick={() => void onSave()}
           >
@@ -249,7 +446,7 @@ export default function BuilderClient() {
           </button>
           <button
             type="button"
-            className="btn-primary"
+            className="btn btn-primary"
             disabled={busy || !id}
             onClick={() => void onDownload()}
           >
@@ -273,30 +470,65 @@ export default function BuilderClient() {
         ))}
       </div>
 
-      <div className="grid min-h-0 flex-1 lg:grid-cols-[320px_1fr]">
-        <aside className="overflow-y-auto border-r border-[var(--border)] bg-[var(--surface-1)]">
+      <div className="builder-split flex min-h-0 flex-1">
+        <aside
+          className="builder-side overflow-y-auto bg-[var(--surface-1)]"
+          style={{ width: panelW }}
+        >
           {tab === "resume" ? (
-            <div className="space-y-5 p-4">
-              <p className="t-caption">Template</p>
-              <div className="grid grid-cols-2 gap-2">
-                {(Object.keys(TPL_META) as TemplateId[]).map((tid) => (
-                  <button
-                    key={tid}
-                    type="button"
-                    className={[
-                      "rounded-[var(--radius-md)] border px-2 py-2 text-left text-[12px] font-medium transition",
-                      settings.template === tid
-                        ? "border-[var(--accent)] bg-[var(--accent-bg)] text-[var(--accent)]"
-                        : "border-[var(--border)] bg-white text-[var(--text-secondary)] hover:border-[var(--border-strong)]",
-                    ].join(" ")}
-                    onClick={() => patchSettings({ template: tid })}
-                  >
-                    {TPL_META[tid].name}
-                  </button>
-                ))}
+            <div className="p-4">
+              <div className="ctl-group space-y-3">
+                <p className="t-caption">Candidate</p>
+                <div className="field">
+                  <label htmlFor="resume-name">Full name</label>
+                  <input
+                    id="resume-name"
+                    value={data.name}
+                    onChange={(e) =>
+                      setData((d) => ({ ...d, name: e.target.value }))
+                    }
+                    placeholder="Your name"
+                  />
+                </div>
+                <div className="field">
+                  <label htmlFor="resume-title">Headline</label>
+                  <input
+                    id="resume-title"
+                    value={data.title}
+                    onChange={(e) =>
+                      setData((d) => ({ ...d, title: e.target.value }))
+                    }
+                    placeholder="e.g. Full-Stack Developer"
+                  />
+                </div>
               </div>
 
-              <div>
+              <div className="ctl-group">
+                <p className="t-caption mb-2">Template</p>
+                <div className="tpl-grid">
+                  {(Object.keys(TPL_META) as TemplateId[]).map((tid) => (
+                    <button
+                      key={tid}
+                      type="button"
+                      className="tpl-thumb"
+                      aria-pressed={settings.template === tid}
+                      onClick={() => patchSettings({ template: tid })}
+                    >
+                      <span className="tpl-thumb-page">
+                        <TplThumb tid={tid} />
+                      </span>
+                      <span className="tpl-thumb-name">
+                        {TPL_META[tid].name}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+                <p className="t-body-sm mt-2 text-[var(--text-muted)]">
+                  {TPL_META[settings.template].desc}
+                </p>
+              </div>
+
+              <div className="ctl-group">
                 <p className="t-caption mb-2">Page size</p>
                 <div className="grid grid-cols-2 gap-2">
                   {(["A4", "LETTER"] as const).map((ps) => (
@@ -304,10 +536,10 @@ export default function BuilderClient() {
                       key={ps}
                       type="button"
                       className={[
-                        "rounded-[var(--radius-md)] border px-3 py-2 text-[13px] font-medium",
+                        "rounded-[var(--radius-md)] border px-3 py-2 text-[13px] font-medium transition",
                         settings.pageSize === ps
                           ? "border-[var(--accent)] bg-[var(--accent)] text-white"
-                          : "border-[var(--border)] bg-white",
+                          : "border-[var(--border)] bg-white hover:border-[var(--border-strong)]",
                       ].join(" ")}
                       onClick={() => patchSettings({ pageSize: ps })}
                     >
@@ -317,7 +549,7 @@ export default function BuilderClient() {
                 </div>
               </div>
 
-              <div className="space-y-2">
+              <div className="ctl-group space-y-2.5">
                 <p className="t-caption">Margins (mm)</p>
                 {(
                   [
@@ -344,51 +576,54 @@ export default function BuilderClient() {
                           },
                         })
                       }
-                      className="flex-1"
+                      className="builder-range flex-1"
                     />
-                    <span className="w-8 font-mono text-[var(--text-muted)]">
+                    <span className="w-8 text-right font-mono text-[11px] text-[var(--text-muted)]">
                       {settings.margins[k]}
                     </span>
                   </label>
                 ))}
               </div>
 
-              {(
-                [
-                  ["sectionSpacing", "Section"],
-                  ["itemSpacing", "Items"],
-                  ["lineHeight", "Lines"],
-                  ["fontSize", "Base"],
-                ] as const
-              ).map(([key, label]) => (
-                <div
-                  key={key}
-                  className="flex items-center justify-between gap-2"
-                >
-                  <span className="text-[12px] font-medium">{label}</span>
-                  <div className="flex gap-0.5 rounded-[var(--radius-sm)] border border-[var(--border)] bg-[var(--surface-0)] p-0.5">
-                    {[1, 2, 3, 4, 5].map((v) => (
-                      <button
-                        key={v}
-                        type="button"
-                        className={[
-                          "h-[23px] min-w-[22px] rounded-[4px] font-mono text-[10.5px] font-medium",
-                          settings[key] === v
-                            ? "bg-[var(--text-primary)] text-white"
-                            : "text-[var(--text-secondary)] hover:bg-white",
-                        ].join(" ")}
-                        onClick={() =>
-                          patchSettings({
-                            [key]: v,
-                          } as Partial<TemplateSettings>)
-                        }
-                      >
-                        {v}
-                      </button>
-                    ))}
+              <div className="ctl-group space-y-2.5">
+                <p className="t-caption">Typography &amp; spacing</p>
+                {(
+                  [
+                    ["sectionSpacing", "Section"],
+                    ["itemSpacing", "Items"],
+                    ["lineHeight", "Lines"],
+                    ["fontSize", "Base"],
+                  ] as const
+                ).map(([key, label]) => (
+                  <div
+                    key={key}
+                    className="flex items-center justify-between gap-2"
+                  >
+                    <span className="text-[12px] font-medium">{label}</span>
+                    <div className="flex gap-0.5 rounded-[var(--radius-sm)] border border-[var(--border)] bg-[var(--surface-0)] p-0.5">
+                      {[1, 2, 3, 4, 5].map((v) => (
+                        <button
+                          key={v}
+                          type="button"
+                          className={[
+                            "h-[23px] min-w-[22px] rounded-[4px] font-mono text-[10.5px] font-medium transition",
+                            settings[key] === v
+                              ? "bg-[var(--text-primary)] text-white"
+                              : "text-[var(--text-secondary)] hover:bg-white",
+                          ].join(" ")}
+                          onClick={() =>
+                            patchSettings({
+                              [key]: v,
+                            } as Partial<TemplateSettings>)
+                          }
+                        >
+                          {v}
+                        </button>
+                      ))}
+                    </div>
                   </div>
-                </div>
-              ))}
+                ))}
+              </div>
             </div>
           ) : null}
 
@@ -416,7 +651,7 @@ export default function BuilderClient() {
               </div>
               <div className="field flex-1">
                 <textarea
-                  className="min-h-[320px] flex-1 resize-none font-[family-name:var(--serifF)] text-[13px] leading-relaxed"
+                  className="builder-resize-y min-h-[320px] w-full flex-1 font-[family-name:var(--serifF)] text-[13px] leading-relaxed"
                   value={cover}
                   onChange={(e) => setCover(e.target.value)}
                   placeholder="Dear Hiring Manager,…"
@@ -461,7 +696,7 @@ export default function BuilderClient() {
               </div>
               <div className="field flex-1">
                 <textarea
-                  className="min-h-[240px] flex-1 resize-none text-[13px] leading-relaxed"
+                  className="builder-resize-y min-h-[240px] w-full flex-1 text-[13px] leading-relaxed"
                   value={outreach}
                   onChange={(e) => setOutreach(e.target.value)}
                   placeholder="Hi — I saw the opening…"
@@ -480,33 +715,40 @@ export default function BuilderClient() {
               </div>
               <div className="field flex-1">
                 <textarea
-                  className="min-h-[220px] flex-1 resize-none font-mono text-[12px] leading-relaxed"
+                  className="builder-resize-y min-h-[240px] w-full flex-1 font-mono text-[12px] leading-relaxed"
                   value={jd}
                   onChange={(e) => setJd(e.target.value)}
                   placeholder="Paste the full job description here…"
                 />
               </div>
-              <div className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface-0)] p-3">
+              <div
+                className={[
+                  "match-card",
+                  !jd.trim()
+                    ? "is-empty"
+                    : match.rate >= 50
+                      ? "is-good"
+                      : match.rate >= 30
+                        ? "is-ok"
+                        : "is-low",
+                ].join(" ")}
+              >
                 <div className="flex items-baseline justify-between gap-2">
-                  <span className="t-body-sm font-medium">Match rate</span>
-                  <span
-                    className="t-h2"
-                    style={{
-                      color:
-                        match.rate >= 50
-                          ? "var(--success)"
-                          : match.rate >= 30
-                            ? "var(--warning)"
-                            : "var(--danger)",
-                    }}
-                  >
+                  <span className="match-card-label">Match rate</span>
+                  <span className="match-card-rate">
                     {jd.trim() ? `${match.rate}%` : "—"}
                   </span>
                 </div>
-                <p className="t-body-sm mt-1 text-[var(--text-muted)]">
-                  {keywords.length} keywords · {match.matches.length} found on
-                  resume
+                <p className="match-card-meta">
+                  {jd.trim()
+                    ? `${keywords.length} keywords · ${match.matches.length} found on resume`
+                    : "Paste a JD to score overlap"}
                 </p>
+                {jd.trim() ? (
+                  <div className="match-card-bar" aria-hidden>
+                    <span style={{ width: `${Math.min(100, match.rate)}%` }} />
+                  </div>
+                ) : null}
               </div>
               {match.missing.length ? (
                 <div>
@@ -542,37 +784,73 @@ export default function BuilderClient() {
           ) : null}
         </aside>
 
-        <section className="flex min-h-0 flex-col">
+        <div
+          className="builder-resizer"
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize data panel"
+          aria-valuenow={panelW}
+          aria-valuemin={PANEL_W_MIN}
+          aria-valuemax={PANEL_W_MAX}
+          onPointerDown={onPanelResizeStart}
+        />
+
+        <section className="flex min-h-0 min-w-0 flex-1 flex-col">
           {tab !== "jd" ? (
-            <div className="flex items-center gap-2 border-b border-[var(--border)] bg-[var(--surface-1)] px-4 py-2">
+            <div className="flex items-center gap-1.5 border-b border-[var(--border)] bg-[var(--surface-1)] px-4 py-2">
               <button
                 type="button"
-                className="btn-ghost"
+                className="btn-ghost btn-icon"
+                aria-label="Zoom out"
                 onClick={() => setZoom((z) => Math.max(0.4, z - 0.05))}
               >
                 −
               </button>
-              <span className="font-mono text-[11px] text-[var(--text-secondary)]">
+              <span className="w-10 text-center font-mono text-[11px] text-[var(--text-secondary)]">
                 {Math.round(zoom * 100)}%
               </span>
               <button
                 type="button"
-                className="btn-ghost"
+                className="btn-ghost btn-icon"
+                aria-label="Zoom in"
                 onClick={() => setZoom((z) => Math.min(1.2, z + 0.05))}
               >
                 +
               </button>
-              <span className="ml-auto font-mono text-[10px] text-[var(--text-muted)]">
-                {page.label}
+              <button
+                type="button"
+                className="btn-ghost"
+                style={{ height: 28, padding: "0 10px", fontSize: 12 }}
+                onClick={fitZoom}
+              >
+                Fit
+              </button>
+              <span className="ml-auto flex items-center gap-2.5">
+                {tab === "resume" ? (
+                  <span
+                    className={["page-pill", pages > 1 ? "warn" : "ok"].join(" ")}
+                    title="Estimated page count"
+                  >
+                    {pages} page{pages > 1 ? "s" : ""}
+                  </span>
+                ) : null}
+                <span className="font-mono text-[10px] text-[var(--text-muted)]">
+                  {page.label}
+                </span>
               </span>
             </div>
           ) : null}
 
-          <div className="min-h-0 flex-1 overflow-auto p-5">
+          <div
+            ref={canvasRef}
+            className="builder-canvas min-h-0 flex-1 overflow-auto p-5"
+          >
             {tab === "resume" ? (
               <div
-                className="mx-auto"
-                style={{ width: page.w * zoom, height: page.h * zoom }}
+                ref={sheetRef}
+                key={settings.template}
+                className="sheet-in mx-auto"
+                style={{ width: page.w * zoom, minHeight: page.h * zoom }}
               >
                 <div
                   style={{
@@ -675,7 +953,7 @@ export default function BuilderClient() {
             ) : null}
 
             {tab === "jd" ? (
-              <div className="mx-auto grid max-w-[1140px] gap-4 lg:grid-cols-2">
+              <div className="mx-auto grid max-w-[1280px] gap-4 lg:grid-cols-2">
                 <div className="panel overflow-hidden p-0">
                   <div className="border-b border-[var(--border)] px-4 py-2.5">
                     <h3 className="t-h3">Job description</h3>
@@ -686,46 +964,25 @@ export default function BuilderClient() {
                   </pre>
                 </div>
                 <div className="panel overflow-hidden p-0">
-                  <div className="border-b border-[var(--border)] px-4 py-2.5">
-                    <h3 className="t-h3">Resume overlap</h3>
-                    <p className="t-body-sm text-[var(--text-muted)]">
-                      Highlighted terms appear in both documents
-                    </p>
+                  <div className="max-h-[70vh] overflow-auto bg-[var(--surface-0)] p-3 sm:p-4">
+                    {jd.trim() ? (
+                      <JdOverlapResume
+                        data={data}
+                        keywords={match.matches}
+                        rate={match.rate}
+                      />
+                    ) : (
+                      <p className="t-body-sm p-2 text-[var(--text-muted)]">
+                        Paste a job description to see formatted resume overlap.
+                      </p>
+                    )}
                   </div>
-                  <div
-                    className="max-h-[70vh] overflow-auto p-4 font-[family-name:var(--serifF)] text-[13px] leading-relaxed text-[#111827] [&_mark.jd-hit]:bg-[#FFF4A3] [&_mark.jd-hit]:px-0.5"
-                    dangerouslySetInnerHTML={{
-                      __html: highlightText(
-                        [
-                          data.name,
-                          data.summary,
-                          ...data.edu.map(
-                            (e) => `${e.role}\n${e.co}\n${e.b.map((b) => b.t).join("\n")}`,
-                          ),
-                          ...data.skills,
-                          ...data.projects.map(
-                            (e) =>
-                              `${e.role}\n${e.b.map((b) => b.t).join("\n")}`,
-                          ),
-                          ...data.exp.map(
-                            (e) =>
-                              `${e.role} at ${e.co}\n${e.b.map((b) => b.t).join("\n")}`,
-                          ),
-                        ].join("\n\n"),
-                        match.matches,
-                      ).replace(/\n/g, "<br/>"),
-                    }}
-                  />
                 </div>
               </div>
             ) : null}
           </div>
         </section>
       </div>
-
-      {toast ? (
-        <div className="toast fixed right-4 bottom-12 z-50">{toast}</div>
-      ) : null}
     </div>
   );
 }

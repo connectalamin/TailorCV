@@ -2,27 +2,35 @@
 
 Upload a master resume, tailor it to a job description, export a PDF, and track applications.
 
-## Status
+## Stack
 
-Frontend-only mock. Design system + agent brief: [`AGENTS.md`](AGENTS.md) · tokens: [`apps/frontend/app/ds.css`](apps/frontend/app/ds.css).
+- **Frontend** — Next.js (`apps/frontend`) on **:3000**
+- **Backend** — FastAPI + SQLite + LiteLLM + `pdflatex` (`apps/backend`) on **:8000**
 
-**Run via Docker only.** Image includes `pdflatex` for ATS resume PDF export.
+Design tokens: [`apps/frontend/app/ds.css`](apps/frontend/app/ds.css). Agent brief: [`AGENTS.md`](AGENTS.md).
+
+**Run via Docker only** — no host `npm install` / no host Python venv.
 
 ## Run
 
 ```bash
+cp .env.example .env   # once
 docker compose up --build
 ```
 
-App on port **3000**. PDF: `POST /api/compile-resume` (also used by Download).
+- App: http://localhost:3000  
+- API health: http://localhost:8000/health  
+- PDF compile: `POST http://localhost:8000/api/compile-resume`
+
+Set `NEXT_PUBLIC_USE_MOCK=true` only if you want the old in-browser localStorage mock (no API; PDF needs the backend).
 
 ## Product flow
 
 1. **Dashboard** — metrics, master / create actions, recent activity  
-2. **Tailor** — paste JD → processing → tailored resume  
+2. **Tailor** — paste JD → improve → tailored resume  
 3. **Viewer** — enhance / edit / download  
 4. **Builder** — Resume · Cover · Outreach · JD Match  
 5. **Applications** — kanban with drag-and-drop  
-6. **Settings** — LLM / preferences / danger zone  
+6. **Settings** — LLM / preferences  
 
-Mock: no real OCR/LLM yet. Resume PDF is compiled with **pdflatex** in Docker.
+LLM keys are configured in **Settings** (stored in the backend SQLite volume).
