@@ -311,15 +311,11 @@ def ai_generate_cover(
     ) or dict(rec.get("data") or {})
     jd = ((body.jd if body else None) or rec.get("jobDescription") or "").strip()
     cover = ""
-    outreach = ""
     if llm_svc.is_configured(cfg):
-        aux = llm_svc.generate_aux(data, jd or "general application", cfg)
-        if aux:
-            cover = str(aux.get("cover_letter") or "")
-            outreach = str(aux.get("outreach_message") or "")
+        cover = llm_svc.generate_cover_letter(data, jd or "general application", cfg) or ""
     if not cover:
         cover = templates.default_cover(data, data.get("title"))
-    return schemas.AiAuxOut(cover_letter=cover, outreach_message=outreach)
+    return schemas.AiAuxOut(cover_letter=cover, outreach_message="")
 
 
 @router.post("/resumes/{rid}/ai/generate-outreach", response_model=schemas.AiAuxOut)
@@ -334,16 +330,12 @@ def ai_generate_outreach(
         body.data.model_dump(mode="json") if body and body.data else None
     ) or dict(rec.get("data") or {})
     jd = ((body.jd if body else None) or rec.get("jobDescription") or "").strip()
-    cover = ""
     outreach = ""
     if llm_svc.is_configured(cfg):
-        aux = llm_svc.generate_aux(data, jd or "general application", cfg)
-        if aux:
-            cover = str(aux.get("cover_letter") or "")
-            outreach = str(aux.get("outreach_message") or "")
+        outreach = llm_svc.generate_outreach(data, jd or "general application", cfg) or ""
     if not outreach:
         outreach = templates.default_outreach(data, data.get("title"))
-    return schemas.AiAuxOut(cover_letter=cover, outreach_message=outreach)
+    return schemas.AiAuxOut(cover_letter="", outreach_message=outreach)
 
 
 @router.post("/resumes/{rid}/ai/match", response_model=schemas.AiMatchOut)

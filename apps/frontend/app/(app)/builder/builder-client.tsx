@@ -108,6 +108,9 @@ export default function BuilderClient() {
   const [zoom, setZoom] = useState(0.78);
   const [busy, setBusy] = useState(false);
   const [aiBusy, setAiBusy] = useState(false);
+  const [aiKind, setAiKind] = useState<
+    null | "cover" | "outreach" | "match" | "retailor" | "content" | "restructure"
+  >(null);
   const [pages, setPages] = useState(1);
   const [panelW, setPanelW] = useState(PANEL_W_DEFAULT);
   const [aiNotes, setAiNotes] = useState("");
@@ -271,12 +274,23 @@ export default function BuilderClient() {
     }
   }
 
-  async function runAi<T>(label: string, fn: () => Promise<T>): Promise<T | null> {
+  async function runAi<T>(
+    label: string,
+    fn: () => Promise<T>,
+    kind:
+      | "cover"
+      | "outreach"
+      | "match"
+      | "retailor"
+      | "content"
+      | "restructure" = "content",
+  ): Promise<T | null> {
     if (!id) {
       toast.message("Open a resume from Dashboard first");
       return null;
     }
     setAiBusy(true);
+    setAiKind(kind);
     try {
       const result = await fn();
       toast.success(label);
@@ -286,11 +300,16 @@ export default function BuilderClient() {
       return null;
     } finally {
       setAiBusy(false);
+      setAiKind(null);
     }
   }
 
   async function onRestructure() {
-    const next = await runAi("Structure rebuilt", () => restructureResume(id!));
+    const next = await runAi(
+      "Structure rebuilt",
+      () => restructureResume(id!),
+      "restructure",
+    );
     if (next) {
       setData(next.data);
       setRecord(next);
@@ -302,8 +321,10 @@ export default function BuilderClient() {
       toast.message("Open a resume from Dashboard first");
       return null;
     }
-    const res = await runAi("Content check ready", () =>
-      aiContentCheck(id, { jd, data }),
+    const res = await runAi(
+      "Content check ready",
+      () => aiContentCheck(id, { jd, data }),
+      "content",
     );
     if (res) setContentCheck(res);
     return res;
@@ -314,8 +335,10 @@ export default function BuilderClient() {
       toast.message("Open a resume from Dashboard first");
       return;
     }
-    const next = await runAi("Issues fixed — Save to persist", () =>
-      aiContentFix(id, { jd, data, issues }),
+    const next = await runAi(
+      "Issues fixed — Save to persist",
+      () => aiContentFix(id, { jd, data, issues }),
+      "content",
     );
     if (next) {
       setData(next);
@@ -334,31 +357,35 @@ export default function BuilderClient() {
       return;
     }
     setAiBusy(true);
+    setAiKind("retailor");
     try {
       const { job_id } = await uploadJobDescriptions([jd], id);
       const res = await improveResume(id, job_id, jd, "balanced");
       if (res.data) setData(res.data);
-      if (res.cover_letter) setCover(res.cover_letter);
-      if (res.outreach_message) setOutreach(res.outreach_message);
       setAiKeywords(res.keywords || []);
       toast.success("Re-tailored draft applied to editor — Save to persist");
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Re-tailor failed");
     } finally {
       setAiBusy(false);
+      setAiKind(null);
     }
   }
 
   async function onGenCover() {
-    const res = await runAi("Cover letter generated", () =>
-      aiGenerateCover(id!, { jd, data }),
+    const res = await runAi(
+      "Cover letter generated",
+      () => aiGenerateCover(id!, { jd, data }),
+      "cover",
     );
     if (res?.cover_letter) setCover(res.cover_letter);
   }
 
   async function onGenOutreach() {
-    const res = await runAi("Outreach generated", () =>
-      aiGenerateOutreach(id!, { jd, data }),
+    const res = await runAi(
+      "Outreach generated",
+      () => aiGenerateOutreach(id!, { jd, data }),
+      "outreach",
     );
     if (res?.outreach_message) setOutreach(res.outreach_message);
   }
@@ -379,6 +406,7 @@ export default function BuilderClient() {
     }
     const req = ++atsReqRef.current;
     setAiBusy(true);
+    setAiKind("match");
     try {
       const res = await aiMatchJd(id, jdText, data);
       if (req !== atsReqRef.current) return;
@@ -411,7 +439,10 @@ export default function BuilderClient() {
       if (req !== atsReqRef.current) return;
       toast.error(e instanceof Error ? e.message : "AI ATS check failed");
     } finally {
-      if (req === atsReqRef.current) setAiBusy(false);
+      if (req === atsReqRef.current) {
+        setAiBusy(false);
+        setAiKind(null);
+      }
     }
   }
 
@@ -451,8 +482,7 @@ export default function BuilderClient() {
       if (res.applied && res.data) {
         setData(res.data);
         lastAtsKeyRef.current = "";
-        toast.success("Resume updated — re-checking ATS fit");
-        void onAiMatch({ silent: true });
+        toast.success("Resume updated — click Check ATS when ready");
       }
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "ATS coach failed");
@@ -467,20 +497,6 @@ export default function BuilderClient() {
       setAtsChatBusy(false);
     }
   }
-
-  // Auto-run ATS fit when this tab is open and the posting is long enough.
-  useEffect(() => {
-    if (tab !== "jd" || !id) return;
-    const jdText = jd.trim();
-    if (jdText.length < 40) return;
-    const key = `${id}\n${jdText}`;
-    if (key === lastAtsKeyRef.current) return;
-    const t = window.setTimeout(() => {
-      void onAiMatch({ silent: true });
-    }, 1400);
-    return () => window.clearTimeout(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- debounce on tab/jd/id only
-  }, [tab, jd, id]);
 
   const page = PAGE[settings.pageSize];
   /** Extra white band above/below each page frame (preview only). */
@@ -688,7 +704,7 @@ export default function BuilderClient() {
                     disabled={aiBusy || !id}
                     onClick={() => void onRetailor()}
                   >
-                    {aiBusy ? "Working…" : "Re-tailor for JD"}
+                    {aiBusy && aiKind === "retailor" ? "Working…" : "Re-tailor for JD"}
                   </button>
                 </div>
               </div>
@@ -913,7 +929,9 @@ export default function BuilderClient() {
                     disabled={aiBusy || !id}
                     onClick={() => void onGenCover()}
                   >
-                    {aiBusy ? "Generating…" : "AI generate"}
+                    {aiBusy && aiKind === "cover"
+                      ? "Generating…"
+                      : "AI generate"}
                   </button>
                 </div>
               </div>
@@ -968,7 +986,9 @@ export default function BuilderClient() {
                     disabled={aiBusy || !id}
                     onClick={() => void onGenOutreach()}
                   >
-                    {aiBusy ? "Generating…" : "AI generate"}
+                    {aiBusy && aiKind === "outreach"
+                      ? "Generating…"
+                      : "AI generate"}
                   </button>
                 </div>
               </div>
@@ -991,20 +1011,24 @@ export default function BuilderClient() {
                     <p className="ats-panel-kicker">ATS fit</p>
                     <p className="ats-panel-hero-meta">
                       {!jd.trim()
-                        ? "Paste a posting to score"
-                        : aiBusy && !hasOfficial
+                        ? "Paste a posting, then Check ATS"
+                        : aiBusy && aiKind === "match"
                           ? `Scanning… ${coverageFound}/${Math.max(coverageTotal, 1)}`
-                          : coverageTotal > 0
-                            ? `${coverageFound}/${coverageTotal} skills · via ${
-                                keywordSource === "ai"
-                                  ? "AI"
-                                  : keywordSource === "local"
-                                    ? "patterns"
-                                    : "matcher"
-                              }`
-                            : hasOfficial && !isKeywordFallback
-                              ? "LLM score ready"
-                              : "Keyword coverage"}
+                          : hasOfficial
+                            ? coverageTotal > 0
+                              ? `${coverageFound}/${coverageTotal} skills · via ${
+                                  keywordSource === "ai"
+                                    ? "AI"
+                                    : keywordSource === "local"
+                                      ? "patterns"
+                                      : "matcher"
+                                }`
+                              : isKeywordFallback
+                                ? "Keyword coverage"
+                                : "LLM score ready"
+                            : jd.trim().length < 40
+                              ? "Paste a fuller posting to enable Check ATS"
+                              : "Click Check ATS for an AI score"}
                     </p>
                   </div>
                   <div
@@ -1042,7 +1066,11 @@ export default function BuilderClient() {
                       void onAiMatch();
                     }}
                   >
-                    {aiBusy ? "Analyzing…" : "Re-check"}
+                    {aiBusy && aiKind === "match"
+                      ? "Analyzing…"
+                      : hasOfficial
+                        ? "Re-check"
+                        : "Check ATS"}
                   </button>
                 </div>
               </header>

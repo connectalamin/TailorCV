@@ -10,7 +10,6 @@ from typing import Any, Literal, Optional
 
 from services import keywords as kw_svc
 from services import llm as llm_svc
-from services import templates
 from services.skills_fmt import categorize_skills
 
 Intensity = Literal["light", "balanced", "aggressive"]
@@ -488,34 +487,18 @@ def improve_resume(
     improved = refine_keywords(improved, keyword_hits)
     improved, fit_meta = fit_to_one_page(improved, cfg)
 
-    cover = ""
-    outreach = ""
+    # Cover / outreach are on-demand in the builder — never auto-generate during tailor.
     level_gap = ""
     if diffs and isinstance(diffs, dict):
-        cover = str(diffs.get("cover_letter") or "").strip()
-        outreach = str(diffs.get("outreach_message") or "").strip()
         level_gap = str(diffs.get("level_gap_note") or "").strip()
-
-    role = role_hint or improved.get("title") or base.get("title") or ""
-    if not cover or not outreach:
-        aux = llm_svc.generate_aux(improved, jd, cfg) if llm_svc.is_configured(cfg) else None
-        if aux:
-            cover = cover or str(aux.get("cover_letter") or "")
-            outreach = outreach or str(aux.get("outreach_message") or "")
-    if not cover:
-        cover = templates.default_cover(improved, role or None)
-    if not outreach:
-        outreach = templates.default_outreach(improved, role or None)
-    if level_gap and level_gap not in cover:
-        cover = f"{cover}\n\n{level_gap}".strip()
 
     payload = {
         "intensity": intensity,
         "data": improved,
         "jd": jd,
         "keywords": keyword_hits,
-        "cover_letter": cover,
-        "outreach_message": outreach,
+        "cover_letter": "",
+        "outreach_message": "",
         "level_gap_note": level_gap,
         "fit": fit_meta,
     }
@@ -524,8 +507,8 @@ def improve_resume(
     return {
         "data": improved,
         "keywords": keyword_hits,
-        "cover_letter": cover,
-        "outreach_message": outreach,
+        "cover_letter": "",
+        "outreach_message": "",
         "intensity": intensity,
         "level_gap_note": level_gap,
         "fit": fit_meta,

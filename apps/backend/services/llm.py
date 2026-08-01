@@ -552,8 +552,8 @@ Return raw JSON only. No markdown code blocks, no preamble, no trailing commenta
       "reason": "string (1 sentence)"
     }
   ],
-  "cover_letter": "string",
-  "outreach_message": "string",
+  "cover_letter": "",
+  "outreach_message": "",
   "level_gap_note": "string"
 }
 
@@ -562,8 +562,8 @@ FIELD DEFINITIONS:
 - title: The candidate's current/most recent title, adjusted to mirror JD terminology if the candidate's actual role supports it. Do not invent titles.
 - skills: Plain text, comma or line-separated using "Category: items" format. No icons, no tables, no nested formatting. Front-load each category with JD-matching items the candidate actually possesses.
 - bullet_edits: Array of objects. Only include bullets that changed. If a bullet is unchanged, omit it. Each object contains the original bullet (verbatim), the revised bullet, and a one-sentence reason for the change.
-- cover_letter: A concise, tailored cover letter paragraph (3-5 sentences) bridging the candidate's background to this JD.
-- outreach_message: A short LinkedIn-style connection note (2-3 sentences) referencing the JD and the candidate's fit.
+- cover_letter: Always "". Cover letters are generated later on demand — do not write one here.
+- outreach_message: Always "". Outreach is generated later on demand — do not write one here.
 - level_gap_note: One honest sentence acknowledging a seniority gap if the candidate is underqualified for the JD's level, and reframing transferable skills. If no gap, return empty string "".
 
 GLOBAL RULES (apply at every intensity):
@@ -843,38 +843,84 @@ def content_fix(
         return None
 
 
-def generate_aux(data: dict, jd: str, cfg: dict) -> Optional[dict]:
+def _aux_user_context(data: dict, jd: str) -> str:
+    role = data.get("title") or "the role"
+    return (
+        f"Target role: {role}\n\nJob description:\n{jd[:3000]}\n\n"
+        f"Candidate summary: {data.get('summary','')}\n"
+        f"Skills: {', '.join((data.get('skills') or [])[:8])}\n"
+        f"Name: {data.get('name','')}"
+    )
+
+
+def generate_cover_letter(data: dict, jd: str, cfg: dict) -> Optional[str]:
+    """On-demand cover letter only (not bundled with outreach or resume tailor)."""
     if not is_configured(cfg):
         return None
-    role = data.get("title") or "the role"
     msgs = [
         {
             "role": "system",
             "content": (
-                "Write application materials. Return ONLY JSON with keys: "
-                "cover_letter (formal, 3 short paragraphs), "
-                "outreach_message (60-90 word cold email). No markdown."
+                "Write a tailored cover letter. Return ONLY JSON with key: "
+                "cover_letter (formal, 3 short paragraphs). No markdown. "
+                "Do not invent employers, metrics, or skills."
             ),
         },
-        {
-            "role": "user",
-            "content": (
-                f"Target role: {role}\n\nJob description:\n{jd[:3000]}\n\n"
-                f"Candidate summary: {data.get('summary','')}\n"
-                f"Skills: {', '.join((data.get('skills') or [])[:8])}\n"
-                f"Name: {data.get('name','')}"
-            ),
-        },
+        {"role": "user", "content": _aux_user_context(data, jd)},
     ]
     with track_operation("aux"):
-        raw = _complete(cfg, msgs, json_mode=True, max_tokens=900)
+        raw = _complete(cfg, msgs, json_mode=True, max_tokens=700)
     if not raw:
         return None
     try:
         obj = json.loads(_strip_fence(raw))
-        return obj if isinstance(obj, dict) else None
+        if not isinstance(obj, dict):
+            return None
+        text = str(obj.get("cover_letter") or "").strip()
+        return text or None
     except json.JSONDecodeError:
         return None
+
+
+def generate_outreach(data: dict, jd: str, cfg: dict) -> Optional[str]:
+    """On-demand outreach email only (not bundled with cover or resume tailor)."""
+    if not is_configured(cfg):
+        return None
+    msgs = [
+        {
+            "role": "system",
+            "content": (
+                "Write a short cold outreach email. Return ONLY JSON with key: "
+                "outreach_message (60-90 words). No markdown. "
+                "Do not invent employers, metrics, or skills."
+            ),
+        },
+        {"role": "user", "content": _aux_user_context(data, jd)},
+    ]
+    with track_operation("aux"):
+        raw = _complete(cfg, msgs, json_mode=True, max_tokens=400)
+    if not raw:
+        return None
+    try:
+        obj = json.loads(_strip_fence(raw))
+        if not isinstance(obj, dict):
+            return None
+        text = str(obj.get("outreach_message") or "").strip()
+        return text or None
+    except json.JSONDecodeError:
+        return None
+
+
+def generate_aux(data: dict, jd: str, cfg: dict) -> Optional[dict]:
+    """Legacy helper — prefer generate_cover_letter / generate_outreach separately."""
+    cover = generate_cover_letter(data, jd, cfg)
+    outreach = generate_outreach(data, jd, cfg)
+    if not cover and not outreach:
+        return None
+    return {
+        "cover_letter": cover or "",
+        "outreach_message": outreach or "",
+    }
 
 
 def shorten_for_one_page(
