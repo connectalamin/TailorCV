@@ -1,7 +1,10 @@
 
 
 # Editor / agent tooling (local only)
-.cursor/
+.cursor/*
+!.cursor/README.md
+!.cursor/rules.md
+!.cursor/rules.md
 
 # Windows/WSL download alternate-data-stream markers
 *:Zone.Identifier
