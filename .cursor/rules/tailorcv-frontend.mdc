@@ -11,5 +11,5 @@ alwaysApply: false
 - One `--accent` (`#000080`) filled button per screen. Featured action card uses accent border, not a second primary fill unless the top bar has no CTA.
 - Flat color + frosted glass only — no decorative gradients; shadows ≤ `0 2px 12px rgba(0,0,0,0.06)`.
 - Keep resume sheet CSS (`.resume-print`, template families) monochrome/ATS when editing `globals.css`.
-- After UI changes: `docker compose up -d --build` (rebuilds frontend; backend if needed).
+- After UI changes: `docker compose up -d --build` (updates frontend image; backend if needed).
 - PDF compile hits the **backend** at `NEXT_PUBLIC_API_URL/api/compile-resume`, not the Next image.

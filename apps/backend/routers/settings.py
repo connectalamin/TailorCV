@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlite3 import Connection
 
 import schemas
@@ -13,13 +13,28 @@ from services import storage
 router = APIRouter()
 
 
-def _out(cfg: dict) -> schemas.LLMConfigOut:
-    base = cfg.get("api_base")
-    return schemas.LLMConfigOut(
-        provider=cfg.get("provider") or "openai",
-        model=cfg.get("model") or "",
+def _entry_out(e: dict) -> schemas.LLMEntryOut:
+    base = e.get("api_base")
+    return schemas.LLMEntryOut(
+        id=e.get("id") or "primary",
+        provider=e.get("provider") or "openai",
+        model=e.get("model") or "",
         apiBase=base if base else None,
-        hasApiKey=bool(cfg.get("api_key")),
+        hasApiKey=bool(e.get("api_key")),
+    )
+
+
+def _out(store: dict) -> schemas.LLMConfigOut:
+    store = llm_svc.normalize_llm_store(store)
+    entries = [_entry_out(e) for e in store["entries"]]
+    first = entries[0] if entries else _entry_out({})
+    return schemas.LLMConfigOut(
+        mode=store.get("mode") or "single",
+        entries=entries,
+        provider=first.provider,
+        model=first.model,
+        apiBase=first.apiBase,
+        hasApiKey=first.hasApiKey,
     )
 
 
@@ -30,7 +45,19 @@ def get_llm(db: Connection = Depends(get_conn)):
 
 @router.put("/llm", response_model=schemas.LLMConfigOut)
 def put_llm(body: schemas.LLMUpdate, db: Connection = Depends(get_conn)):
-    cfg = storage.put_llm(db, body.model_dump(exclude_unset=True))
+    raw = body.model_dump(exclude_unset=True)
+    if raw.get("entries"):
+        raw["entries"] = [
+            e if isinstance(e, dict) else e
+            for e in raw["entries"]
+        ]
+    cfg = storage.put_llm(db, raw)
+    return _out(cfg)
+
+
+@router.delete("/llm/entries/{entry_id}", response_model=schemas.LLMConfigOut)
+def delete_llm_entry(entry_id: str, db: Connection = Depends(get_conn)):
+    cfg = storage.delete_llm_entry(db, entry_id)
     return _out(cfg)
 
 
@@ -39,9 +66,12 @@ def test_llm(
     body: schemas.LLMUpdate | None = None, db: Connection = Depends(get_conn)
 ):
     cfg = storage.get_llm(db)
+    entry_id = None
     if body is not None:
-        cfg = storage.merge_llm(cfg, body.model_dump(exclude_unset=True))
-    ok, msg = llm_svc.test(cfg)
+        raw = body.model_dump(exclude_unset=True)
+        entry_id = raw.pop("entryId", None)
+        cfg = storage.merge_llm(cfg, raw)
+    ok, msg = llm_svc.test(cfg, entry_id=entry_id)
     return schemas.TestOut(ok=ok, message=msg)
 
 

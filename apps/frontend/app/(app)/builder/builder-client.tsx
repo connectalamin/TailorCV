@@ -14,22 +14,28 @@ import {
 import { ResumePreview } from "@/components/resume/resume-preview";
 import { JdOverlapResume } from "@/components/resume/jd-overlap-resume";
 import {
+  aiGenerateCover,
+  aiGenerateOutreach,
+  aiMatchJd,
+  aiRewriteSection,
   downloadResumePdf,
   fetchResume,
   getSampleResume,
+  improveResume,
+  restructureResume,
   updateResume,
+  uploadJobDescriptions,
 } from "@/lib/api";
 import {
   DEFAULT_TEMPLATE_SETTINGS,
   PAGE,
-  TPL_META,
   defaultCoverLetter,
   defaultOutreachMail,
 } from "@/lib/mock/data";
 import type {
+  KeywordHit,
   ResumeData,
   ResumeRecord,
-  TemplateId,
   TemplateSettings,
 } from "@/lib/types/resume";
 import {
@@ -61,7 +67,14 @@ function loadSettings(): TemplateSettings {
     const raw = localStorage.getItem(SETTINGS_KEY);
     if (raw) {
       const parsed = JSON.parse(raw) as Partial<TemplateSettings>;
-      return { ...DEFAULT_TEMPLATE_SETTINGS, ...parsed };
+      return {
+        ...DEFAULT_TEMPLATE_SETTINGS,
+        ...parsed,
+        template: "latex",
+        projectsTwoColumn:
+          parsed.projectsTwoColumn ??
+          DEFAULT_TEMPLATE_SETTINGS.projectsTwoColumn,
+      };
     }
   } catch {
     /* ignore */
@@ -71,128 +84,6 @@ function loadSettings(): TemplateSettings {
 
 function wordCount(s: string) {
   return s.trim().split(/\s+/).filter(Boolean).length;
-}
-
-function TplThumb({ tid }: { tid: TemplateId }) {
-  const L = ({ w, d = false, cls = "" }: { w: string; d?: boolean; cls?: string }) => (
-    <i
-      className={`block h-[2px] rounded-full ${d ? "bg-[#4a4a46]" : "bg-[#ddd9d2]"} ${cls}`}
-      style={{ width: w }}
-    />
-  );
-  const R = () => <i className="block h-px w-full bg-[#1a1a18]" />;
-  const hair = <i className="block h-px w-full bg-[#e2ded6]" />;
-
-  switch (tid) {
-    case "latex":
-      return (
-        <>
-          <L w="46%" d cls="mx-auto h-[3px]" />
-          <L w="64%" cls="mx-auto" />
-          <div className="mt-[2px] flex flex-col gap-[3px]">
-            <R />
-            <L w="88%" />
-            <L w="66%" />
-            <R />
-            <L w="78%" />
-            <L w="52%" />
-          </div>
-        </>
-      );
-    case "swiss-single":
-      return (
-        <>
-          <L w="50%" d cls="h-[3px]" />
-          {hair}
-          <L w="34%" d />
-          <L w="90%" />
-          <L w="72%" />
-          <L w="34%" d cls="mt-[2px]" />
-          <L w="84%" />
-        </>
-      );
-    case "swiss-two-column":
-      return (
-        <div className="flex flex-1 gap-[4px]">
-          <div className="flex flex-[2] flex-col gap-[3px]">
-            <L w="60%" d />
-            <L w="100%" />
-            <L w="86%" />
-            <L w="92%" />
-            <L w="70%" />
-          </div>
-          <div className="flex flex-1 flex-col gap-[3px] border-l border-[#e2ded6] pl-[4px]">
-            <L w="90%" />
-            <L w="70%" />
-            <L w="84%" />
-          </div>
-        </div>
-      );
-    case "modern":
-      return (
-        <>
-          <div className="flex items-center gap-[3px]">
-            <i className="block h-[10px] w-[2.5px] rounded-full bg-[#1a1a18]" />
-            <L w="42%" d cls="h-[3px]" />
-          </div>
-          <L w="88%" />
-          <L w="74%" />
-          <div className="mt-[2px] flex items-center gap-[4px]">
-            <L w="26%" d />
-            <i className="block h-px flex-1 bg-[#e2ded6]" />
-          </div>
-          <L w="82%" />
-        </>
-      );
-    case "modern-two-column":
-      return (
-        <>
-          <div className="flex items-center gap-[3px]">
-            <i className="block h-[9px] w-[2.5px] rounded-full bg-[#1a1a18]" />
-            <L w="38%" d cls="h-[3px]" />
-          </div>
-          <div className="flex flex-1 gap-[4px]">
-            <div className="flex flex-[2] flex-col gap-[3px]">
-              <L w="96%" />
-              <L w="82%" />
-              <L w="90%" />
-            </div>
-            <div className="flex flex-1 flex-col gap-[3px] border-l border-[#e2ded6] pl-[4px]">
-              <L w="88%" />
-              <L w="66%" />
-            </div>
-          </div>
-        </>
-      );
-    case "clean":
-      return (
-        <>
-          <L w="44%" d cls="h-[3px]" />
-          <L w="30%" />
-          <L w="24%" d cls="mt-[5px]" />
-          <L w="90%" />
-          <L w="64%" />
-        </>
-      );
-    case "vivid":
-      return (
-        <div className="flex flex-1 gap-[4px]">
-          <div className="flex flex-[35] flex-col gap-[3px] border-r border-[#e2ded6] pr-[4px]">
-            <i className="block h-[3px] w-[80%] rounded-full bg-[var(--accent)]" />
-            <L w="90%" />
-            <L w="68%" />
-          </div>
-          <div className="flex flex-[65] flex-col gap-[3px]">
-            <L w="70%" d />
-            <L w="94%" />
-            <L w="80%" />
-            <L w="88%" />
-          </div>
-        </div>
-      );
-    default:
-      return null;
-  }
 }
 
 export default function BuilderClient() {
@@ -209,8 +100,11 @@ export default function BuilderClient() {
   const [jd, setJd] = useState("");
   const [zoom, setZoom] = useState(0.78);
   const [busy, setBusy] = useState(false);
+  const [aiBusy, setAiBusy] = useState(false);
   const [pages, setPages] = useState(1);
   const [panelW, setPanelW] = useState(PANEL_W_DEFAULT);
+  const [aiNotes, setAiNotes] = useState("");
+  const [aiKeywords, setAiKeywords] = useState<KeywordHit[]>([]);
   const sheetRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
   const panelWRef = useRef(PANEL_W_DEFAULT);
@@ -314,7 +208,11 @@ export default function BuilderClient() {
     if (!id) return;
     setBusy(true);
     try {
-      const blob = await downloadResumePdf(id);
+      const blob = await downloadResumePdf(id, {
+        pageSize: settings.pageSize,
+        marginIn: Number((settings.margins.top / 25.4).toFixed(2)),
+        projectsTwoColumn: settings.projectsTwoColumn,
+      });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
@@ -329,12 +227,124 @@ export default function BuilderClient() {
     }
   }
 
+  async function runAi<T>(label: string, fn: () => Promise<T>): Promise<T | null> {
+    if (!id) {
+      toast.message("Open a resume from Dashboard first");
+      return null;
+    }
+    setAiBusy(true);
+    try {
+      const result = await fn();
+      toast.success(label);
+      return result;
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "AI request failed");
+      return null;
+    } finally {
+      setAiBusy(false);
+    }
+  }
+
+  async function onRewrite(section: string) {
+    const next = await runAi("Section rewritten", () =>
+      aiRewriteSection(id!, section, { jd, data, intensity: "balanced" }),
+    );
+    if (next) setData(next);
+  }
+
+  async function onRestructure() {
+    const next = await runAi("Structure rebuilt", () => restructureResume(id!));
+    if (next) {
+      setData(next.data);
+      setRecord(next);
+    }
+  }
+
+  async function onRetailor() {
+    if (!id) {
+      toast.message("Open a resume from Dashboard first");
+      return;
+    }
+    if (jd.trim().length < 40) {
+      toast.error("Paste a fuller job description in the JD tab first");
+      return;
+    }
+    setAiBusy(true);
+    try {
+      const { job_id } = await uploadJobDescriptions([jd], id);
+      const res = await improveResume(id, job_id, jd, "balanced");
+      if (res.data) setData(res.data);
+      if (res.cover_letter) setCover(res.cover_letter);
+      if (res.outreach_message) setOutreach(res.outreach_message);
+      setAiKeywords(res.keywords || []);
+      toast.success("Re-tailored draft applied to editor — Save to persist");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Re-tailor failed");
+    } finally {
+      setAiBusy(false);
+    }
+  }
+
+  async function onGenCover() {
+    const res = await runAi("Cover letter generated", () =>
+      aiGenerateCover(id!, { jd, data }),
+    );
+    if (res?.cover_letter) setCover(res.cover_letter);
+  }
+
+  async function onGenOutreach() {
+    const res = await runAi("Outreach generated", () =>
+      aiGenerateOutreach(id!, { jd, data }),
+    );
+    if (res?.outreach_message) setOutreach(res.outreach_message);
+  }
+
+  async function onAiMatch() {
+    if (jd.trim().length < 40) {
+      toast.error("Paste a fuller job description first");
+      return;
+    }
+    const res = await runAi("Match analysis ready", () =>
+      aiMatchJd(id!, jd, data),
+    );
+    if (res) {
+      setAiKeywords(res.keywords || []);
+      setAiNotes(res.notes || "");
+    }
+  }
+
+  async function onApplyMatchSuggestions() {
+    if (!aiKeywords.length) {
+      toast.message("Run AI match first");
+      return;
+    }
+    const next = await runAi("Suggestions applied", () =>
+      aiRewriteSection(id!, "skills", { jd, data, intensity: "balanced" }),
+    );
+    if (next) {
+      setData(next);
+      const obj = await aiRewriteSection(id!, "summary", {
+        jd,
+        data: next,
+        intensity: "balanced",
+      }).catch(() => null);
+      if (obj) setData(obj);
+    }
+  }
+
   const page = PAGE[settings.pageSize];
-  const today = new Date().toLocaleDateString("en-US", {
-    year: "numeric",
-    month: "long",
-    day: "numeric",
-  });
+  /** Extra white band above/below each page frame (preview only). */
+  const PAGE_EDGE = 36;
+  const [today, setToday] = useState("");
+  useEffect(() => {
+    setToday(
+      new Date().toLocaleDateString("en-US", {
+        year: "numeric",
+        month: "long",
+        day: "numeric",
+      }),
+    );
+  }, []);
 
   useLayoutEffect(() => {
     if (tab !== "resume") return;
@@ -400,7 +410,7 @@ export default function BuilderClient() {
 
   const docSub = [
     record?.title && record.title !== data.name ? record.title : null,
-    TPL_META[settings.template].name,
+    "LaTeX ATS",
     settings.pageSize === "LETTER" ? "US Letter" : "A4",
   ]
     .filter(Boolean)
@@ -503,29 +513,117 @@ export default function BuilderClient() {
                 </div>
               </div>
 
-              <div className="ctl-group">
-                <p className="t-caption mb-2">Template</p>
-                <div className="tpl-grid">
-                  {(Object.keys(TPL_META) as TemplateId[]).map((tid) => (
-                    <button
-                      key={tid}
-                      type="button"
-                      className="tpl-thumb"
-                      aria-pressed={settings.template === tid}
-                      onClick={() => patchSettings({ template: tid })}
-                    >
-                      <span className="tpl-thumb-page">
-                        <TplThumb tid={tid} />
-                      </span>
-                      <span className="tpl-thumb-name">
-                        {TPL_META[tid].name}
-                      </span>
-                    </button>
-                  ))}
+              <div className="ctl-group space-y-2">
+                <p className="t-caption">AI</p>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    className="btn btn-ghost"
+                    disabled={aiBusy || !id}
+                    onClick={() => void onRewrite("summary")}
+                  >
+                    Rewrite Objective
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-ghost"
+                    disabled={aiBusy || !id}
+                    onClick={() => void onRewrite("skills")}
+                  >
+                    Rewrite Skills
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-ghost"
+                    disabled={aiBusy || !id}
+                    onClick={() => void onRewrite("exp")}
+                  >
+                    Rewrite Experience
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-ghost"
+                    disabled={aiBusy || !id}
+                    onClick={() => void onRestructure()}
+                  >
+                    Re-parse structure
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    disabled={aiBusy || !id}
+                    onClick={() => void onRetailor()}
+                  >
+                    {aiBusy ? "Working…" : "Re-tailor for JD"}
+                  </button>
                 </div>
-                <p className="t-body-sm mt-2 text-[var(--text-muted)]">
-                  {TPL_META[settings.template].desc}
-                </p>
+              </div>
+
+              <div className="ctl-group space-y-3">
+                <p className="t-caption">Objective</p>
+                <div className="field">
+                  <textarea
+                    className="builder-resize-y min-h-[88px] w-full text-[13px]"
+                    value={data.summary}
+                    onChange={(e) =>
+                      setData((d) => ({ ...d, summary: e.target.value }))
+                    }
+                    placeholder="1–2 sentence objective"
+                  />
+                </div>
+              </div>
+
+              <div className="ctl-group space-y-3">
+                <p className="t-caption">Technical Skills</p>
+                <div className="field">
+                  <textarea
+                    className="builder-resize-y min-h-[100px] w-full font-mono text-[12px]"
+                    value={data.skills.join("\n")}
+                    onChange={(e) =>
+                      setData((d) => ({
+                        ...d,
+                        skills: e.target.value
+                          .split("\n")
+                          .map((s) => s.trim())
+                          .filter(Boolean),
+                      }))
+                    }
+                    placeholder={"Languages: Python, C++\nFrontend: React, Next.js"}
+                  />
+                </div>
+                <p className="hint">One category per line: Category: items</p>
+              </div>
+
+              <div className="ctl-group space-y-3">
+                <p className="t-caption">Experience bullets</p>
+                {data.exp.map((ex, ei) => (
+                  <div key={`${ex.role}-${ei}`} className="field">
+                    <label>
+                      {ex.role || "Role"} — {ex.co || "Company"}
+                    </label>
+                    <textarea
+                      className="builder-resize-y min-h-[72px] w-full text-[12px]"
+                      value={(ex.b || []).map((b) => b.t).join("\n")}
+                      onChange={(e) => {
+                        const lines = e.target.value
+                          .split("\n")
+                          .map((t) => t.trim())
+                          .filter(Boolean)
+                          .map((t) => ({ t }));
+                        setData((d) => {
+                          const exp = [...d.exp];
+                          exp[ei] = { ...exp[ei], b: lines };
+                          return { ...d, exp };
+                        });
+                      }}
+                    />
+                  </div>
+                ))}
+                {!data.exp.length ? (
+                  <p className="t-body-sm text-[var(--text-muted)]">
+                    No experience entries — use Re-parse structure after upload.
+                  </p>
+                ) : null}
               </div>
 
               <div className="ctl-group">
@@ -544,6 +642,32 @@ export default function BuilderClient() {
                       onClick={() => patchSettings({ pageSize: ps })}
                     >
                       {ps === "LETTER" ? "US Letter" : ps}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="ctl-group">
+                <p className="t-caption mb-2">Projects layout</p>
+                <div className="grid grid-cols-2 gap-2">
+                  {(
+                    [
+                      [false, "1 column"],
+                      [true, "2 columns"],
+                    ] as const
+                  ).map(([two, label]) => (
+                    <button
+                      key={label}
+                      type="button"
+                      className={[
+                        "rounded-[var(--radius-md)] border px-3 py-2 text-[13px] font-medium transition",
+                        settings.projectsTwoColumn === two
+                          ? "border-[var(--accent)] bg-[var(--accent)] text-white"
+                          : "border-[var(--border)] bg-white hover:border-[var(--border-strong)]",
+                      ].join(" ")}
+                      onClick={() => patchSettings({ projectsTwoColumn: two })}
+                    >
+                      {label}
                     </button>
                   ))}
                 </div>
@@ -635,19 +759,29 @@ export default function BuilderClient() {
                   Formal one-page letter. Mirror keywords from the JD.
                 </p>
               </div>
-              <div className="flex items-center justify-between gap-2">
+              <div className="flex flex-wrap items-center justify-between gap-2">
                 <span className="t-body-sm text-[var(--text-muted)]">
                   {wordCount(cover)} words
                 </span>
-                <button
-                  type="button"
-                  className="btn-ghost"
-                  onClick={() =>
-                    setCover(defaultCoverLetter(data, record?.role))
-                  }
-                >
-                  Insert template
-                </button>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    className="btn btn-ghost"
+                    onClick={() =>
+                      setCover(defaultCoverLetter(data, record?.role))
+                    }
+                  >
+                    Insert template
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    disabled={aiBusy || !id}
+                    onClick={() => void onGenCover()}
+                  >
+                    {aiBusy ? "Generating…" : "AI generate"}
+                  </button>
+                </div>
               </div>
               <div className="field flex-1">
                 <textarea
@@ -680,19 +814,29 @@ export default function BuilderClient() {
                   placeholder="Interest in Role — Company"
                 />
               </div>
-              <div className="flex items-center justify-between gap-2">
+              <div className="flex flex-wrap items-center justify-between gap-2">
                 <span className="t-body-sm text-[var(--text-muted)]">
                   {wordCount(outreach)} words
                 </span>
-                <button
-                  type="button"
-                  className="btn-ghost"
-                  onClick={() =>
-                    setOutreach(defaultOutreachMail(data, record?.role))
-                  }
-                >
-                  Insert template
-                </button>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    className="btn btn-ghost"
+                    onClick={() =>
+                      setOutreach(defaultOutreachMail(data, record?.role))
+                    }
+                  >
+                    Insert template
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    disabled={aiBusy || !id}
+                    onClick={() => void onGenOutreach()}
+                  >
+                    {aiBusy ? "Generating…" : "AI generate"}
+                  </button>
+                </div>
               </div>
               <div className="field flex-1">
                 <textarea
@@ -713,6 +857,24 @@ export default function BuilderClient() {
                   Paste the posting. We extract keywords and score overlap.
                 </p>
               </div>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  disabled={aiBusy || !id}
+                  onClick={() => void onAiMatch()}
+                >
+                  {aiBusy ? "Analyzing…" : "AI match analysis"}
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  disabled={aiBusy || !id || !aiKeywords.length}
+                  onClick={() => void onApplyMatchSuggestions()}
+                >
+                  Apply suggestions
+                </button>
+              </div>
               <div className="field flex-1">
                 <textarea
                   className="builder-resize-y min-h-[240px] w-full flex-1 font-mono text-[12px] leading-relaxed"
@@ -721,6 +883,29 @@ export default function BuilderClient() {
                   placeholder="Paste the full job description here…"
                 />
               </div>
+              {aiNotes ? (
+                <div className="rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--surface-0)] p-3">
+                  <p className="t-caption mb-1">AI notes</p>
+                  <p className="t-body-sm whitespace-pre-wrap text-[var(--text-secondary)]">
+                    {aiNotes}
+                  </p>
+                </div>
+              ) : null}
+              {aiKeywords.length ? (
+                <div>
+                  <p className="t-caption mb-2">AI keywords</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {aiKeywords.slice(0, 24).map((h) => (
+                      <span
+                        key={h.k}
+                        className="rounded-[var(--radius-sm)] border border-[var(--accent)]/40 bg-[var(--accent-soft)] px-2 py-0.5 text-[11px]"
+                      >
+                        {h.k}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
               <div
                 className={[
                   "match-card",
@@ -846,21 +1031,55 @@ export default function BuilderClient() {
             className="builder-canvas min-h-0 flex-1 overflow-auto p-5"
           >
             {tab === "resume" ? (
-              <div
-                ref={sheetRef}
-                key={settings.template}
-                className="sheet-in mx-auto"
-                style={{ width: page.w * zoom, minHeight: page.h * zoom }}
-              >
+              <div className="resume-page-stack mx-auto">
+                {/* Off-screen measure sheet for page count */}
                 <div
-                  style={{
-                    transform: `scale(${zoom})`,
-                    transformOrigin: "top left",
-                    width: page.w,
-                  }}
+                  ref={sheetRef}
+                  aria-hidden
+                  className="pointer-events-none absolute -left-[9999px] top-0"
+                  style={{ width: page.w }}
                 >
                   <ResumePreview data={data} settings={settings} />
                 </div>
+                {Array.from({ length: pages }, (_, i) => (
+                  <div
+                    key={`${settings.template}-p${i}`}
+                    className="resume-page-frame"
+                    style={{
+                      width: page.w * zoom,
+                      height: (page.h + PAGE_EDGE * 2) * zoom,
+                      paddingTop: PAGE_EDGE * zoom,
+                      paddingBottom: PAGE_EDGE * zoom,
+                      boxSizing: "border-box",
+                    }}
+                  >
+                    {pages > 1 ? (
+                      <span
+                        className="resume-page-label"
+                        style={{ top: Math.max(6, PAGE_EDGE * zoom * 0.25) }}
+                      >
+                        {i + 1} / {pages}
+                      </span>
+                    ) : null}
+                    <div
+                      className="resume-page-clip"
+                      style={{
+                        height: page.h * zoom,
+                        overflow: "hidden",
+                      }}
+                    >
+                      <div
+                        style={{
+                          transform: `translateY(${-i * page.h * zoom}px) scale(${zoom})`,
+                          transformOrigin: "top left",
+                          width: page.w,
+                        }}
+                      >
+                        <ResumePreview data={data} settings={settings} />
+                      </div>
+                    </div>
+                  </div>
+                ))}
               </div>
             ) : null}
 

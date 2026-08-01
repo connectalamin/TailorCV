@@ -105,18 +105,43 @@ class KeywordHit(BaseModel):
     m: int
 
 
-class LLMConfigOut(BaseModel):
+class LLMEntryOut(BaseModel):
+    id: str
     provider: str
     model: str
     apiBase: Optional[str] = None
     hasApiKey: bool = False
 
 
-class LLMUpdate(BaseModel):
+class LLMConfigOut(BaseModel):
+    mode: Literal["single", "fallback"] = "single"
+    entries: list[LLMEntryOut] = Field(default_factory=list)
+    # Legacy flat fields (first entry) for older clients
+    provider: str = "openai"
+    model: str = ""
+    apiBase: Optional[str] = None
+    hasApiKey: bool = False
+
+
+class LLMEntryUpdate(BaseModel):
+    id: Optional[str] = None
     provider: Optional[str] = None
     model: Optional[str] = None
     apiBase: Optional[str] = None
     apiKey: Optional[str] = None
+    clearApiKey: Optional[bool] = None
+
+
+class LLMUpdate(BaseModel):
+    mode: Optional[Literal["single", "fallback"]] = None
+    entries: Optional[list[LLMEntryUpdate]] = None
+    # Legacy flat
+    provider: Optional[str] = None
+    model: Optional[str] = None
+    apiBase: Optional[str] = None
+    apiKey: Optional[str] = None
+    clearApiKey: Optional[bool] = None
+    entryId: Optional[str] = None  # for test targeting
 
 
 class TestOut(BaseModel):
@@ -148,6 +173,16 @@ class AnalyzeReq(BaseModel):
 class ImproveReq(BaseModel):
     job_id: str = ""
     jd: Optional[str] = None
+    intensity: Literal[
+        "light",
+        "balanced",
+        "aggressive",
+        # Legacy aliases (normalized server-side)
+        "nudge",
+        "keywords",
+        "full",
+    ] = "balanced"
+    hint: str = ""
 
 
 class ImproveOut(BaseModel):
@@ -155,10 +190,53 @@ class ImproveOut(BaseModel):
     preview_hash: str
     cover_letter: str
     outreach_message: str
+    intensity: str = "balanced"
+    keywords: list[KeywordHit] = Field(default_factory=list)
+    status: str = "preview"
+    data: Optional[ResumeData] = None
 
 
 class ConfirmReq(BaseModel):
     preview_hash: str = ""
+    create_application: bool = True
+
+
+class AiRewriteReq(BaseModel):
+    section: str
+    jd: Optional[str] = None
+    intensity: Literal[
+        "light",
+        "balanced",
+        "aggressive",
+        "nudge",
+        "keywords",
+        "full",
+    ] = "balanced"
+    data: Optional[ResumeData] = None
+
+
+class AiAuxReq(BaseModel):
+    jd: Optional[str] = None
+    data: Optional[ResumeData] = None
+
+
+class AiMatchReq(BaseModel):
+    jd: str = ""
+    data: Optional[ResumeData] = None
+
+
+class AiRewriteOut(BaseModel):
+    data: ResumeData
+
+
+class AiAuxOut(BaseModel):
+    cover_letter: str = ""
+    outreach_message: str = ""
+
+
+class AiMatchOut(BaseModel):
+    keywords: list[KeywordHit] = Field(default_factory=list)
+    notes: str = ""
 
 
 class CompileReq(BaseModel):
@@ -167,6 +245,7 @@ class CompileReq(BaseModel):
     pageSize: Optional[Literal["A4", "LETTER"]] = None
     marginIn: Optional[float] = None
     filename: Optional[str] = None
+    projectsTwoColumn: Optional[bool] = None
 
 
 class CompileStatus(BaseModel):

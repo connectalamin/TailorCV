@@ -11,8 +11,8 @@ from sqlite3 import Connection
 import config
 import schemas
 from db import get_conn
-from services import parser, storage, templates
-from services import llm as llm_svc
+from services import improver, llm as llm_svc, parser, storage, templates
+from services.skills_fmt import categorize_skills
 
 router = APIRouter()
 
@@ -30,6 +30,8 @@ async def upload(file: UploadFile = File(...), db: Connection = Depends(get_conn
         text, _ext = parser.extract_text(name, content)
     except Exception as e:  # noqa: BLE001
         raise HTTPException(422, f"Could not parse file: {e}")
+    if not (text or "").strip():
+        raise HTTPException(422, "Empty extracted text — upload a readable resume")
     cfg = storage.get_llm(db)
     data = parser.build_data(name, text, cfg)
     rid = f"master-{uuid.uuid4().hex[:8]}"
@@ -90,62 +92,250 @@ def get_jd(rid: str, db: Connection = Depends(get_conn)):
 
 
 @router.post("/resumes/{rid}/improve", response_model=schemas.ImproveOut)
-def improve(rid: str, body: schemas.ImproveReq, db: Connection = Depends(get_conn)):
+@router.post("/resumes/{rid}/improve/preview", response_model=schemas.ImproveOut)
+def improve_preview(
+    rid: str, body: schemas.ImproveReq, db: Connection = Depends(get_conn)
+):
+    """Compute tailored draft + preview_hash. Persists as status=preview until confirm."""
     base = storage.get_resume(db, rid, with_data=True) or storage.get_master(db, with_data=True)
     if not base:
         raise HTTPException(404, "No master resume — upload one first")
+
+    job = storage.get_job(db, body.job_id) if body.job_id else None
+    jd = (body.jd or "").strip() or (job or {}).get("description") or (base.get("jobDescription") or "")
+    if len(jd.strip()) < 40:
+        raise HTTPException(400, "Job description too short — paste a fuller posting")
+
+    parent_id = base["id"]
+    storage.delete_stale_previews(db, parent_id)
+
     data = dict(base.get("data") or {})
-    jd = (body.jd or "").strip() or (base.get("jobDescription") or "")
-    role = base.get("role") or data.get("title") or ""
+    # Identity lock for confirm step
+    personal_fingerprint = hashlib.sha256(
+        f"{data.get('name','')}|{(data.get('contact') or {}).get('email','')}".encode()
+    ).hexdigest()[:16]
+
+    role = base.get("role") or data.get("title") or (job or {}).get("role") or ""
     cfg = storage.get_llm(db)
+    intensity = improver.normalize_intensity(body.intensity)
 
-    summary = data.get("summary", "")
-    cover = ""
-    outreach = ""
-    tailored = llm_svc.tailor(data, jd, cfg) if llm_svc.is_configured(cfg) else None
-    if tailored:
-        summary = tailored.get("summary") or summary
-        cover = tailored.get("cover_letter") or ""
-        outreach = tailored.get("outreach_message") or ""
-    if not cover:
-        cover = templates.default_cover(data, role or None)
-    if not outreach:
-        outreach = templates.default_outreach(data, role or None)
+    result = improver.improve_resume(
+        data,
+        jd,
+        cfg,
+        intensity=intensity,
+        role_hint=role or "",
+        hint=(body.hint or "").strip(),
+    )
+    new_data = result["data"]
+    # Re-check personal info unchanged
+    if (new_data.get("name") or "") != (data.get("name") or ""):
+        new_data["name"] = data.get("name") or ""
+    new_data["contact"] = dict(data.get("contact") or {})
 
-    new_data = {**data, "summary": summary}
-    new_id = f"tailored-{int(time.time() * 1000)}"
-    preview_hash = "sha256:" + hashlib.sha256((new_id + jd).encode()).hexdigest()[:16]
-    company = base.get("company") or "Target Company"
     person = (data.get("name") or "").strip() or "Resume"
+    company = base.get("company") or (job or {}).get("company") or "Target Company"
+    new_id = f"tailored-{int(time.time() * 1000)}"
+    preview_hash = result["preview_hash"] + ":" + personal_fingerprint
 
     storage.create_resume(
         db,
         id=new_id,
         title=f"Tailored · {person}",
         is_master=False,
-        status="ready",
+        status="preview",
         company=company,
-        role=role or None,
+        role=new_data.get("title") or role or None,
         data=new_data,
         job_description=jd or None,
-        cover_letter=cover,
-        outreach_message=outreach,
+        cover_letter=result["cover_letter"],
+        outreach_message=result["outreach_message"],
         preview_hash=preview_hash,
+        intensity=result["intensity"],
+        parent_id=parent_id,
     )
+
     return schemas.ImproveOut(
         resume_id=new_id,
         preview_hash=preview_hash,
-        cover_letter=cover,
-        outreach_message=outreach,
+        cover_letter=result["cover_letter"],
+        outreach_message=result["outreach_message"],
+        intensity=result["intensity"],
+        keywords=[schemas.KeywordHit(**h) for h in result["keywords"]],
+        status="preview",
+        data=schemas.ResumeData.model_validate(new_data),
     )
 
 
 @router.post("/resumes/{rid}/confirm", status_code=204)
+@router.post("/resumes/{rid}/improve/confirm", status_code=204)
 def confirm(rid: str, body: schemas.ConfirmReq, db: Connection = Depends(get_conn)):
-    row = db.execute("SELECT preview_hash FROM resumes WHERE id=?", (rid,)).fetchone()
+    """Persist tailored resume only if preview_hash matches."""
+    row = db.execute(
+        "SELECT preview_hash, status, parent_id, company, role, intensity FROM resumes WHERE id=?",
+        (rid,),
+    ).fetchone()
     if not row:
         raise HTTPException(404, "Resume not found")
-    stored = row["preview_hash"]
+    stored = row["preview_hash"] or ""
     if stored and body.preview_hash and stored != body.preview_hash:
         raise HTTPException(409, "preview_hash mismatch — confirm rejected")
+
+    rec = storage.confirm_preview(db, rid, body.preview_hash or stored)
+    if not rec:
+        raise HTTPException(409, "preview_hash mismatch — confirm rejected")
+
+    parent_id = row["parent_id"] or ""
+    storage.create_improvement(
+        db,
+        original_id=parent_id or rid,
+        tailored_id=rid,
+        job_id=None,
+        intensity=row["intensity"],
+        preview_hash=stored,
+    )
+
+    if body.create_application:
+        storage.create_application(
+            db,
+            {
+                "company": row["company"] or "Target Company",
+                "role": row["role"] or "Role",
+                "status": "applied",
+                "resumeId": rid,
+                "notes": f"Tailored ({row['intensity'] or 'balanced'})",
+            },
+        )
     return Response(status_code=204)
+
+
+@router.post("/resumes/{rid}/restructure", response_model=schemas.ResumeRecord)
+def restructure_resume(rid: str, db: Connection = Depends(get_conn)):
+    """Re-parse stored resume into ATS sections (fix blob Objective)."""
+    rec = storage.get_resume(db, rid, with_data=True)
+    if not rec:
+        raise HTTPException(404, "Resume not found")
+    cfg = storage.get_llm(db)
+    data = dict(rec.get("data") or {})
+    text = parser.data_to_plain_text(data)
+    # Prefer blob summary as source when present
+    if llm_svc.is_blob_resume(data) and data.get("summary"):
+        text = str(data["summary"])
+    new_data = parser.build_data(rec.get("sourceFile") or "resume.txt", text, cfg)
+    # Preserve contact/name if restructure empties them
+    if not new_data.get("name"):
+        new_data["name"] = data.get("name") or "Candidate"
+    if data.get("contact") and not any((new_data.get("contact") or {}).values()):
+        new_data["contact"] = data["contact"]
+    updated = storage.update_resume(db, rid, {"data": new_data})
+    if not updated:
+        raise HTTPException(404, "Resume not found")
+    return updated
+
+
+@router.post("/resumes/{rid}/ai/rewrite-section", response_model=schemas.AiRewriteOut)
+def ai_rewrite_section(
+    rid: str, body: schemas.AiRewriteReq, db: Connection = Depends(get_conn)
+):
+    rec = storage.get_resume(db, rid, with_data=True)
+    if not rec:
+        raise HTTPException(404, "Resume not found")
+    cfg = storage.get_llm(db)
+    if not llm_svc.is_configured(cfg):
+        raise HTTPException(400, "LLM not configured — add an API key in Settings")
+    data = (body.data.model_dump(mode="json") if body.data else None) or dict(
+        rec.get("data") or {}
+    )
+    jd = (body.jd or rec.get("jobDescription") or "").strip()
+    patch = llm_svc.rewrite_section(
+        data, body.section, jd, cfg, intensity=improver.normalize_intensity(body.intensity)
+    )
+    if not patch:
+        raise HTTPException(502, "AI rewrite failed — try another model or check the API key")
+    out = dict(data)
+    for key in ("summary", "skills", "exp", "projects", "edu", "awards", "title"):
+        if key in patch and patch[key] is not None:
+            out[key] = patch[key]
+    if "skills" in out:
+        out["skills"] = categorize_skills(out.get("skills") or [])
+    # Map objective alias
+    if "summary" not in patch and body.section.lower() in ("objective", "summary"):
+        if isinstance(patch.get("objective"), str):
+            out["summary"] = patch["objective"]
+    try:
+        validated = schemas.ResumeData.model_validate(out)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(422, f"Invalid AI response shape: {e}")
+    return schemas.AiRewriteOut(data=validated)
+
+
+@router.post("/resumes/{rid}/ai/generate-cover", response_model=schemas.AiAuxOut)
+def ai_generate_cover(
+    rid: str, body: schemas.AiAuxReq | None = None, db: Connection = Depends(get_conn)
+):
+    rec = storage.get_resume(db, rid, with_data=True)
+    if not rec:
+        raise HTTPException(404, "Resume not found")
+    cfg = storage.get_llm(db)
+    data = (
+        body.data.model_dump(mode="json") if body and body.data else None
+    ) or dict(rec.get("data") or {})
+    jd = ((body.jd if body else None) or rec.get("jobDescription") or "").strip()
+    cover = ""
+    outreach = ""
+    if llm_svc.is_configured(cfg):
+        aux = llm_svc.generate_aux(data, jd or "general application", cfg)
+        if aux:
+            cover = str(aux.get("cover_letter") or "")
+            outreach = str(aux.get("outreach_message") or "")
+    if not cover:
+        cover = templates.default_cover(data, data.get("title"))
+    return schemas.AiAuxOut(cover_letter=cover, outreach_message=outreach)
+
+
+@router.post("/resumes/{rid}/ai/generate-outreach", response_model=schemas.AiAuxOut)
+def ai_generate_outreach(
+    rid: str, body: schemas.AiAuxReq | None = None, db: Connection = Depends(get_conn)
+):
+    rec = storage.get_resume(db, rid, with_data=True)
+    if not rec:
+        raise HTTPException(404, "Resume not found")
+    cfg = storage.get_llm(db)
+    data = (
+        body.data.model_dump(mode="json") if body and body.data else None
+    ) or dict(rec.get("data") or {})
+    jd = ((body.jd if body else None) or rec.get("jobDescription") or "").strip()
+    cover = ""
+    outreach = ""
+    if llm_svc.is_configured(cfg):
+        aux = llm_svc.generate_aux(data, jd or "general application", cfg)
+        if aux:
+            cover = str(aux.get("cover_letter") or "")
+            outreach = str(aux.get("outreach_message") or "")
+    if not outreach:
+        outreach = templates.default_outreach(data, data.get("title"))
+    return schemas.AiAuxOut(cover_letter=cover, outreach_message=outreach)
+
+
+@router.post("/resumes/{rid}/ai/match", response_model=schemas.AiMatchOut)
+def ai_match(
+    rid: str, body: schemas.AiMatchReq, db: Connection = Depends(get_conn)
+):
+    rec = storage.get_resume(db, rid, with_data=True)
+    if not rec:
+        raise HTTPException(404, "Resume not found")
+    jd = (body.jd or "").strip()
+    if len(jd) < 40:
+        raise HTTPException(400, "Job description too short")
+    cfg = storage.get_llm(db)
+    data = (body.data.model_dump(mode="json") if body.data else None) or dict(
+        rec.get("data") or {}
+    )
+    keywords = improver.extract_job_keywords(jd, cfg)
+    notes = ""
+    if llm_svc.is_configured(cfg):
+        notes = llm_svc.match_notes(data, jd, keywords, cfg) or ""
+    return schemas.AiMatchOut(
+        keywords=[schemas.KeywordHit(**h) for h in keywords],
+        notes=notes,
+    )

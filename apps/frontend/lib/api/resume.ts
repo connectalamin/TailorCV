@@ -9,9 +9,11 @@ import {
 } from "@/lib/mock/data";
 import type {
   KeywordHit,
+  ImproveResult,
   ResumeData,
   ResumeListItem,
   ResumeRecord,
+  TailorIntensity,
 } from "@/lib/types/resume";
 
 let resumes: ResumeRecord[] = [];
@@ -78,6 +80,7 @@ export async function fetchResumeList(
     ensureLoaded();
     const out = resumes
       .filter((r) => includeMaster || !r.isMaster)
+      .filter((r) => r.status !== "preview")
       .map(({ data: _d, ...item }) => item);
     const m = out.find((r) => r.isMaster);
     if (m) cachedMaster = m.id;
@@ -151,12 +154,8 @@ export async function improveResume(
   resumeId: string,
   jobId: string,
   jdText?: string,
-): Promise<{
-  resume_id: string;
-  preview_hash: string;
-  cover_letter: string;
-  outreach_message: string;
-}> {
+  intensity: TailorIntensity = "balanced",
+): Promise<ImproveResult> {
   if (USE_MOCK_API) {
     await delay(1100);
     ensureLoaded();
@@ -171,15 +170,18 @@ export async function improveResume(
     const jd =
       jdText?.trim() ||
       "Senior Frontend Engineer — React, TypeScript, design systems.";
+    if (intensity !== "light") {
+      data.summary = `${data.summary} Aligned for this role (${intensity}).`.trim();
+    }
     const coverLetter = defaultCoverLetter(data);
     const outreachMessage = defaultOutreachMail(data);
     resumes = [
       ...resumes,
       {
         id,
-        title: `Tailored · ${data.title}`,
+        title: `Tailored · ${data.name || data.title}`,
         isMaster: false,
-        status: "ready",
+        status: "preview",
         company: "Target Company",
         role: data.title,
         updatedAt: new Date().toISOString(),
@@ -195,17 +197,23 @@ export async function improveResume(
       preview_hash: hash,
       cover_letter: coverLetter,
       outreach_message: outreachMessage,
+      intensity,
+      keywords: structuredClone(SAMPLE_KEYWORDS),
+      status: "preview",
+      data,
     };
   }
-  return jsonFetch<{
-    resume_id: string;
-    preview_hash: string;
-    cover_letter: string;
-    outreach_message: string;
-  }>(`/resumes/${encodeURIComponent(resumeId)}/improve`, {
-    method: "POST",
-    body: JSON.stringify({ job_id: jobId, jd: jdText ?? "" }),
-  });
+  return jsonFetch<ImproveResult>(
+    `/resumes/${encodeURIComponent(resumeId)}/improve/preview`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        job_id: jobId,
+        jd: jdText ?? "",
+        intensity,
+      }),
+    },
+  );
 }
 
 export async function updateResume(
@@ -250,22 +258,46 @@ export async function fetchJobDescription(
 export async function confirmTailor(
   resumeId: string,
   previewHash: string,
+  createApplication = true,
 ): Promise<void> {
   if (USE_MOCK_API) {
     await delay(300);
     if (lastPreviewHash && previewHash !== lastPreviewHash) {
       throw new Error("preview_hash mismatch — confirm rejected");
     }
-    void resumeId;
+    ensureLoaded();
+    const idx = resumes.findIndex((r) => r.id === resumeId);
+    if (idx >= 0) {
+      resumes[idx] = {
+        ...resumes[idx],
+        status: "ready",
+        updatedAt: new Date().toISOString(),
+      };
+      persist();
+    }
+    void createApplication;
     return;
   }
-  await jsonFetch<void>(`/resumes/${encodeURIComponent(resumeId)}/confirm`, {
-    method: "POST",
-    body: JSON.stringify({ preview_hash: previewHash }),
-  });
+  await jsonFetch<void>(
+    `/resumes/${encodeURIComponent(resumeId)}/improve/confirm`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        preview_hash: previewHash,
+        create_application: createApplication,
+      }),
+    },
+  );
 }
 
-export async function downloadResumePdf(resumeId: string): Promise<Blob> {
+export async function downloadResumePdf(
+  resumeId: string,
+  opts?: {
+    pageSize?: "A4" | "LETTER";
+    marginIn?: number;
+    projectsTwoColumn?: boolean;
+  },
+): Promise<Blob> {
   let record: ResumeRecord | undefined;
   if (USE_MOCK_API) {
     ensureLoaded();
@@ -284,8 +316,9 @@ export async function downloadResumePdf(resumeId: string): Promise<Blob> {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       data: record.data,
-      pageSize: "LETTER",
-      marginIn: 0.75,
+      pageSize: opts?.pageSize || "LETTER",
+      marginIn: opts?.marginIn ?? 0.75,
+      projectsTwoColumn: opts?.projectsTwoColumn ?? true,
       filename: record.data.name,
     }),
   });
@@ -333,4 +366,104 @@ export async function ensureMasterLoaded(): Promise<void> {
 
 export function getSampleResume(): ResumeData {
   return structuredClone(SAMPLE_RESUME);
+}
+
+export async function restructureResume(id: string): Promise<ResumeRecord> {
+  if (USE_MOCK_API) {
+    await delay(800);
+    ensureLoaded();
+    const found = resumes.find((r) => r.id === id);
+    if (!found) throw new Error("Resume not found");
+    return structuredClone(found);
+  }
+  return jsonFetch<ResumeRecord>(
+    `/resumes/${encodeURIComponent(id)}/restructure`,
+    { method: "POST" },
+  );
+}
+
+export async function aiRewriteSection(
+  id: string,
+  section: string,
+  opts?: { jd?: string; intensity?: TailorIntensity; data?: ResumeData },
+): Promise<ResumeData> {
+  if (USE_MOCK_API) {
+    await delay(700);
+    ensureLoaded();
+    const found = resumes.find((r) => r.id === id);
+    const data = structuredClone(opts?.data || found?.data || SAMPLE_RESUME);
+    if (section === "summary" || section === "objective") {
+      data.summary = `${data.summary} (AI rewrite)`.slice(0, 280);
+    }
+    return data;
+  }
+  const res = await jsonFetch<{ data: ResumeData }>(
+    `/resumes/${encodeURIComponent(id)}/ai/rewrite-section`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        section,
+        jd: opts?.jd ?? "",
+        intensity: opts?.intensity ?? "balanced",
+        data: opts?.data,
+      }),
+    },
+  );
+  return res.data;
+}
+
+export async function aiGenerateCover(
+  id: string,
+  opts?: { jd?: string; data?: ResumeData },
+): Promise<{ cover_letter: string; outreach_message: string }> {
+  if (USE_MOCK_API) {
+    await delay(700);
+    const data = opts?.data || SAMPLE_RESUME;
+    return {
+      cover_letter: defaultCoverLetter(data),
+      outreach_message: defaultOutreachMail(data),
+    };
+  }
+  return jsonFetch(`/resumes/${encodeURIComponent(id)}/ai/generate-cover`, {
+    method: "POST",
+    body: JSON.stringify({ jd: opts?.jd ?? "", data: opts?.data }),
+  });
+}
+
+export async function aiGenerateOutreach(
+  id: string,
+  opts?: { jd?: string; data?: ResumeData },
+): Promise<{ cover_letter: string; outreach_message: string }> {
+  if (USE_MOCK_API) {
+    await delay(700);
+    const data = opts?.data || SAMPLE_RESUME;
+    return {
+      cover_letter: defaultCoverLetter(data),
+      outreach_message: defaultOutreachMail(data),
+    };
+  }
+  return jsonFetch(`/resumes/${encodeURIComponent(id)}/ai/generate-outreach`, {
+    method: "POST",
+    body: JSON.stringify({ jd: opts?.jd ?? "", data: opts?.data }),
+  });
+}
+
+export async function aiMatchJd(
+  id: string,
+  jd: string,
+  data?: ResumeData,
+): Promise<{ keywords: KeywordHit[]; notes: string }> {
+  if (USE_MOCK_API) {
+    await delay(700);
+    void id;
+    void data;
+    return {
+      keywords: structuredClone(SAMPLE_KEYWORDS),
+      notes: "Strong frontend overlap. Emphasize React and TypeScript in Objective.",
+    };
+  }
+  return jsonFetch(`/resumes/${encodeURIComponent(id)}/ai/match`, {
+    method: "POST",
+    body: JSON.stringify({ jd, data }),
+  });
 }

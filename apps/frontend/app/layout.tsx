@@ -25,8 +25,11 @@ export default function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="en">
-      <body className={`${serif.variable} ${mono.variable} antialiased`}>
+    <html lang="en" suppressHydrationWarning>
+      <body
+        className={`${serif.variable} ${mono.variable} antialiased`}
+        suppressHydrationWarning
+      >
         {children}
         <Toaster
           theme="dark"

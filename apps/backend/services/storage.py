@@ -9,16 +9,17 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 
 import schemas
+from services.skills_fmt import categorize_skills
 
 SEED_APPS = [
-    {"company": "Stripe", "role": "Senior Frontend Engineer", "status": "applied", "match": 92, "template": "swiss-two-column", "dateLabel": "2d"},
-    {"company": "Figma", "role": "Product Engineer", "status": "interview", "match": 90, "template": "swiss-single", "dateLabel": "Tue 11:00"},
-    {"company": "Linear", "role": "Design Engineer", "status": "interview", "match": 88, "template": "vivid", "dateLabel": "Thu 14:30"},
-    {"company": "Ramp", "role": "Senior Frontend Engineer", "status": "offer", "match": 93, "template": "swiss-two-column", "dateLabel": "$185k"},
-    {"company": "Notion", "role": "Frontend Engineer", "status": "applied", "match": 81, "template": "clean", "dateLabel": "5d"},
-    {"company": "Vercel", "role": "Developer Experience Eng", "status": "wish", "match": 84, "template": "modern", "dateLabel": "—"},
-    {"company": "Retool", "role": "Frontend Engineer", "status": "wish", "match": 78, "template": "latex", "dateLabel": "—"},
-    {"company": "Datadog", "role": "Software Engineer II", "status": "applied", "match": 76, "template": "modern-two-column", "dateLabel": "1w"},
+    {"company": "Acme Cloud", "role": "Frontend Engineer", "status": "applied", "match": 92, "template": "latex", "dateLabel": "2d"},
+    {"company": "Brightly", "role": "Full-Stack Engineer", "status": "interview", "match": 90, "template": "latex", "dateLabel": "Tue 11:00"},
+    {"company": "Northwind", "role": "Software Engineer", "status": "interview", "match": 88, "template": "latex", "dateLabel": "Thu 14:30"},
+    {"company": "Harbor Soft", "role": "Frontend Engineer", "status": "offer", "match": 93, "template": "latex", "dateLabel": "Offer"},
+    {"company": "Contour", "role": "React Developer", "status": "applied", "match": 81, "template": "latex", "dateLabel": "5d"},
+    {"company": "Leaf Labs", "role": "Developer Experience Eng", "status": "wish", "match": 84, "template": "latex", "dateLabel": "—"},
+    {"company": "Pixel Forge", "role": "Frontend Engineer", "status": "wish", "match": 78, "template": "latex", "dateLabel": "—"},
+    {"company": "Signal Metrics", "role": "Software Engineer II", "status": "applied", "match": 76, "template": "latex", "dateLabel": "1w"},
 ]
 
 
@@ -44,7 +45,10 @@ def _rec(row: sqlite3.Row, with_data: bool = True) -> dict:
         "sourceFile": row["source_file"],
     }
     if with_data:
-        d["data"] = json.loads(row["data_json"]) if row["data_json"] else {}
+        data = json.loads(row["data_json"]) if row["data_json"] else {}
+        if isinstance(data, dict) and data.get("skills") is not None:
+            data["skills"] = categorize_skills(data.get("skills") or [])
+        d["data"] = data
         if row["job_description"]:
             d["jobDescription"] = row["job_description"]
         if row["cover_letter"]:
@@ -72,10 +76,15 @@ def _app(row: sqlite3.Row) -> dict:
 # ---------- resumes ----------
 
 def list_resumes(db: sqlite3.Connection, include_master: bool = True) -> list[dict]:
+    # Hide unconfirmed previews from dashboards / lists
     if include_master:
-        rows = db.execute("SELECT * FROM resumes ORDER BY is_master DESC, updated_at DESC").fetchall()
+        rows = db.execute(
+            "SELECT * FROM resumes WHERE status!='preview' ORDER BY is_master DESC, updated_at DESC"
+        ).fetchall()
     else:
-        rows = db.execute("SELECT * FROM resumes WHERE is_master=0 ORDER BY updated_at DESC").fetchall()
+        rows = db.execute(
+            "SELECT * FROM resumes WHERE is_master=0 AND status!='preview' ORDER BY updated_at DESC"
+        ).fetchall()
     return [_rec(r, with_data=False) for r in rows]
 
 
@@ -104,14 +113,16 @@ def create_resume(
     outreach_message: Optional[str] = None,
     source_file: Optional[str] = None,
     preview_hash: Optional[str] = None,
+    intensity: Optional[str] = None,
+    parent_id: Optional[str] = None,
     updated_at: Optional[str] = None,
 ) -> dict:
     if is_master:
         db.execute("UPDATE resumes SET is_master=0 WHERE is_master=1")
     db.execute(
         """INSERT INTO resumes
-           (id,title,is_master,status,company,role,updated_at,source_file,data_json,job_description,cover_letter,outreach_message,preview_hash)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+           (id,title,is_master,status,company,role,updated_at,source_file,data_json,job_description,cover_letter,outreach_message,preview_hash,intensity,parent_id)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (
             id,
             title,
@@ -126,10 +137,99 @@ def create_resume(
             cover_letter,
             outreach_message,
             preview_hash,
+            intensity,
+            parent_id,
         ),
     )
     db.commit()
     return get_resume(db, id)  # type: ignore[return-value]
+
+
+def confirm_preview(db: sqlite3.Connection, rid: str, preview_hash: str) -> Optional[dict]:
+    row = db.execute("SELECT * FROM resumes WHERE id=?", (rid,)).fetchone()
+    if not row:
+        return None
+    stored = row["preview_hash"] or ""
+    if stored and preview_hash and stored != preview_hash:
+        return None
+    db.execute(
+        "UPDATE resumes SET status='ready', updated_at=? WHERE id=?",
+        (_now(), rid),
+    )
+    db.commit()
+    return get_resume(db, rid)
+
+
+def delete_stale_previews(db: sqlite3.Connection, parent_id: str) -> None:
+    db.execute(
+        "DELETE FROM resumes WHERE parent_id=? AND status='preview'",
+        (parent_id,),
+    )
+    db.commit()
+
+
+def create_job(
+    db: sqlite3.Connection,
+    *,
+    description: str,
+    resume_id: Optional[str] = None,
+    keywords: Optional[list] = None,
+    company: Optional[str] = None,
+    role: Optional[str] = None,
+) -> dict:
+    jid = f"job-{int(time.time() * 1000)}"
+    db.execute(
+        """INSERT INTO jobs (id, resume_id, description, keywords_json, company, role, created_at)
+           VALUES (?,?,?,?,?,?,?)""",
+        (
+            jid,
+            resume_id,
+            description,
+            json.dumps(keywords or []),
+            company,
+            role,
+            _now(),
+        ),
+    )
+    db.commit()
+    return {"job_id": jid, "id": jid}
+
+
+def get_job(db: sqlite3.Connection, jid: str) -> Optional[dict]:
+    row = db.execute("SELECT * FROM jobs WHERE id=?", (jid,)).fetchone()
+    if not row:
+        return None
+    try:
+        kws = json.loads(row["keywords_json"] or "[]")
+    except json.JSONDecodeError:
+        kws = []
+    return {
+        "id": row["id"],
+        "resume_id": row["resume_id"],
+        "description": row["description"],
+        "keywords": kws,
+        "company": row["company"],
+        "role": row["role"],
+    }
+
+
+def create_improvement(
+    db: sqlite3.Connection,
+    *,
+    original_id: str,
+    tailored_id: str,
+    job_id: Optional[str],
+    intensity: Optional[str],
+    preview_hash: Optional[str],
+) -> None:
+    iid = f"imp-{uuid.uuid4().hex[:10]}"
+    db.execute(
+        """INSERT INTO improvements
+           (id, original_id, tailored_id, job_id, intensity, preview_hash, created_at)
+           VALUES (?,?,?,?,?,?,?)""",
+        (iid, original_id, tailored_id, job_id, intensity, preview_hash, _now()),
+    )
+    db.commit()
 
 
 def update_resume(db: sqlite3.Connection, rid: str, patch: dict) -> Optional[dict]:
@@ -237,49 +337,148 @@ def counts(db: sqlite3.Connection) -> tuple[int, int]:
     return int(r), int(a)
 
 
-_DEFAULT_LLM = {"provider": "openai", "model": "gpt-4o-mini", "api_base": None, "api_key": None}
+_DEFAULT_LLM_STORE = {
+    "mode": "single",
+    "entries": [
+        {
+            "id": "primary",
+            "provider": "openai",
+            "model": "gpt-4o-mini",
+            "api_base": None,
+            "api_key": None,
+        }
+    ],
+}
 
 
 def get_llm(db: sqlite3.Connection) -> dict:
+    from services import llm as _llm
+
     row = db.execute("SELECT value FROM settings WHERE key='llm'").fetchone()
     if not row:
-        return dict(_DEFAULT_LLM)
+        return _llm.normalize_llm_store(_DEFAULT_LLM_STORE)
     try:
         stored = json.loads(row["value"])
     except json.JSONDecodeError:
-        return dict(_DEFAULT_LLM)
-    merged = dict(_DEFAULT_LLM)
-    merged.update({k: v for k, v in stored.items() if v is not None})
-    return merged
+        return _llm.normalize_llm_store(_DEFAULT_LLM_STORE)
+    return _llm.normalize_llm_store(stored)
+
+
+def _persist_llm(db: sqlite3.Connection, store: dict) -> dict:
+    from services import llm as _llm
+
+    store = _llm.normalize_llm_store(store)
+    for e in store["entries"]:
+        info = _llm.PROVIDER_INFO.get(e.get("provider") or "")
+        if info and not e.get("model"):
+            e["model"] = info["defaultModel"]
+    db.execute(
+        "INSERT INTO settings(key,value) VALUES('llm',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+        (json.dumps(store),),
+    )
+    db.commit()
+    return store
 
 
 def put_llm(db: sqlite3.Connection, update: dict) -> dict:
-    cur = merge_llm(get_llm(db), update)
-    from services import llm as _llm  # local import to avoid cycle at module load
+    """Accept full store update or legacy flat patch."""
+    cur = get_llm(db)
+    merged = merge_llm(cur, update)
+    return _persist_llm(db, merged)
 
-    info = _llm.PROVIDER_INFO.get(cur["provider"])
-    if info and (not cur.get("model")):
-        cur["model"] = info["defaultModel"]
-    db.execute(
-        "INSERT INTO settings(key,value) VALUES('llm',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
-        (json.dumps(cur),),
-    )
-    db.commit()
-    return cur
+
+def delete_llm_entry(db: sqlite3.Connection, entry_id: str) -> dict:
+    store = get_llm(db)
+    entries = [e for e in store["entries"] if e.get("id") != entry_id]
+    if not entries:
+        entries = [dict(_DEFAULT_LLM_STORE["entries"][0])]
+    store["entries"] = entries
+    if store["mode"] == "single":
+        store["entries"] = entries[:1]
+    return _persist_llm(db, store)
 
 
 def merge_llm(cur: dict, update: dict) -> dict:
-    """Apply a partial LLMUpdate onto a config dict without persisting."""
-    out = dict(cur)
-    if update.get("provider") is not None:
-        out["provider"] = update["provider"]
-    if update.get("model") is not None:
-        out["model"] = update["model"]
-    if "apiBase" in update:
-        out["api_base"] = update.get("apiBase") or None
-    if "apiKey" in update and update.get("apiKey"):
-        out["api_key"] = update["apiKey"]
-    return out
+    """Apply LLM update onto store. Supports full {mode, entries} or legacy flat fields."""
+    from services import llm as _llm
+
+    store = _llm.normalize_llm_store(cur)
+
+    if "mode" in update and update["mode"] in ("single", "fallback"):
+        store["mode"] = update["mode"]
+
+    if "entries" in update and isinstance(update["entries"], list):
+        new_entries = []
+        existing_by_id = {e["id"]: e for e in store["entries"]}
+        for i, raw in enumerate(update["entries"]):
+            if not isinstance(raw, dict):
+                continue
+            eid = raw.get("id") or f"e{i}-{uuid.uuid4().hex[:6]}"
+            prev = existing_by_id.get(eid, {})
+            provider = raw.get("provider") if raw.get("provider") is not None else prev.get("provider", "openai")
+            model = raw.get("model") if raw.get("model") is not None else prev.get("model", "")
+            # apiBase / api_base
+            if "apiBase" in raw:
+                api_base = raw.get("apiBase") or None
+            elif "api_base" in raw:
+                api_base = raw.get("api_base") or None
+            else:
+                api_base = prev.get("api_base")
+            # apiKey: empty/omit keeps existing; explicit null clears
+            if "apiKey" in raw:
+                key_val = raw.get("apiKey")
+                if key_val:
+                    api_key = key_val
+                elif key_val is None or key_val == "":
+                    # empty string on replace form means keep; use clearApiKey flag
+                    if raw.get("clearApiKey"):
+                        api_key = None
+                    else:
+                        api_key = prev.get("api_key")
+                else:
+                    api_key = prev.get("api_key")
+            elif "api_key" in raw and raw.get("api_key"):
+                api_key = raw["api_key"]
+            else:
+                api_key = prev.get("api_key")
+            if raw.get("clearApiKey"):
+                api_key = None
+            new_entries.append(
+                {
+                    "id": eid,
+                    "provider": provider,
+                    "model": model,
+                    "api_base": api_base,
+                    "api_key": api_key,
+                }
+            )
+        if new_entries:
+            store["entries"] = new_entries
+
+    # Legacy flat patch against first entry
+    elif any(k in update for k in ("provider", "model", "apiBase", "apiKey", "api_base", "api_key")):
+        if not store["entries"]:
+            store["entries"] = [dict(_DEFAULT_LLM_STORE["entries"][0])]
+        e0 = dict(store["entries"][0])
+        if update.get("provider") is not None:
+            e0["provider"] = update["provider"]
+        if update.get("model") is not None:
+            e0["model"] = update["model"]
+        if "apiBase" in update:
+            e0["api_base"] = update.get("apiBase") or None
+        if "api_base" in update:
+            e0["api_base"] = update.get("api_base") or None
+        if update.get("apiKey"):
+            e0["api_key"] = update["apiKey"]
+        if update.get("api_key"):
+            e0["api_key"] = update["api_key"]
+        if update.get("clearApiKey"):
+            e0["api_key"] = None
+        store["entries"][0] = e0
+
+    if store["mode"] == "single":
+        store["entries"] = store["entries"][:1] or [dict(_DEFAULT_LLM_STORE["entries"][0])]
+    return store
 
 
 def seed_demo(db: sqlite3.Connection) -> None:

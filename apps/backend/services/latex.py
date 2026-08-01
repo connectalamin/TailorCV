@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from services.skills_fmt import categorize_skills
+
 
 def escape(s: str) -> str:
     return (
@@ -30,33 +32,70 @@ def _bullets(items: list[dict]) -> str:
 
 
 def _skills(skills: list[str]) -> str:
-    out = []
+    """Categorized skill lines; two-column tabular when 4+ categories (ATS-safe text)."""
+    items: list[str] = []
     for s in skills:
         i = s.find(":")
         if i > 0:
-            out.append(
-                f"    \\item \\textbf{{{escape(s[: i + 1])}}}{escape(s[i + 1:])}"
+            items.append(
+                f"\\textbf{{{escape(s[: i + 1])}}}{escape(s[i + 1:])}"
             )
         else:
-            out.append(f"    \\item {escape(s)}")
-    return "\\begin{itemize}\n" + "\n".join(out) + "\n\\end{itemize}"
+            items.append(escape(s))
+    if not items:
+        return ""
+    if len(items) >= 4:
+        # Pair into two columns without multicol package
+        rows = []
+        for i in range(0, len(items), 2):
+            left = f"\\textbullet\\ {items[i]}"
+            right = f"\\textbullet\\ {items[i + 1]}" if i + 1 < len(items) else ""
+            rows.append(f"{left} & {right} \\\\")
+        body = "\n".join(rows)
+        return (
+            "\\noindent\\begin{tabular*}{\\textwidth}{@{}p{0.48\\textwidth}@{\\extracolsep{\\fill}}p{0.48\\textwidth}@{}}\n"
+            f"{body}\n\\end{{tabular*}}"
+        )
+    lines = "\n".join(f"    \\item {it}" for it in items)
+    return f"\\begin{{itemize}}\n{lines}\n\\end{{itemize}}"
 
 
 def _pairs(items: list, sep_paren: bool) -> str:
-    rows = []
+    """Achievement/cert lines; two-column when many items."""
+    rows_txt: list[str] = []
     for p in items:
         a = p[0] if len(p) > 0 else ""
         b = p[1] if len(p) > 1 else ""
         if sep_paren:
-            rows.append(f"    \\item {escape(a)}{(f' ({escape(b)})' if b else '')}")
+            rows_txt.append(escape(a) + (f" ({escape(b)})" if b else ""))
         else:
-            rows.append(f"    \\item {escape(a)}{(f' --- {escape(b)}' if b else '')}")
-    return "\\begin{itemize}\n" + "\n".join(rows) + "\n\\end{itemize}"
+            rows_txt.append(escape(a) + (f" --- {escape(b)}" if b else ""))
+    if not rows_txt:
+        return ""
+    if len(rows_txt) >= 4:
+        rows = []
+        for i in range(0, len(rows_txt), 2):
+            left = f"\\textbullet\\ {rows_txt[i]}"
+            right = f"\\textbullet\\ {rows_txt[i + 1]}" if i + 1 < len(rows_txt) else ""
+            rows.append(f"{left} & {right} \\\\")
+        body = "\n".join(rows)
+        return (
+            "\\noindent\\begin{tabular*}{\\textwidth}{@{}p{0.48\\textwidth}@{\\extracolsep{\\fill}}p{0.48\\textwidth}@{}}\n"
+            f"{body}\n\\end{{tabular*}}"
+        )
+    lines = "\n".join(f"    \\item {t}" for t in rows_txt)
+    return f"\\begin{{itemize}}\n{lines}\n\\end{{itemize}}"
 
 
-def build(data: dict, page_size: str = "LETTER", margin_in: float = 0.75) -> str:
+def build(
+    data: dict,
+    page_size: str = "LETTER",
+    margin_in: float = 0.75,
+    projects_two_column: bool = True,
+) -> str:
     paper = "a4paper" if page_size == "A4" else "letterpaper"
     contact = (data.get("contact") or {})
+    skills = categorize_skills(data.get("skills") or [])
     parts = [
         contact.get("location"),
         contact.get("email"),
@@ -70,15 +109,25 @@ def build(data: dict, page_size: str = "LETTER", margin_in: float = 0.75) -> str
     edu = data.get("edu") or []
     edu_blocks = []
     for e in edu:
-        lines = [f"\\textbf{{{_g(e, 'role')}}} \\hfill {_g(e, 'meta')} \\\\"]
-        co = _g(e, "co")
-        loc = _g(e, "loc")
-        if co:
-            lines.append(
-                f"{escape(co)}{(f' \\hfill \\textit{{{escape(loc)}}}' if loc else '')} \\\\"
-            )
-        elif loc:
-            lines.append(f"\\textit{{{escape(loc)}}} \\\\")
+        # co=school, role=degree, meta=dates, loc=GPA
+        school = _g(e, "co") or _g(e, "role")
+        degree = _g(e, "role") if _g(e, "co") else ""
+        dates = _g(e, "meta")
+        gpa = _g(e, "loc")
+        lines = []
+        if school:
+            lines.append(f"\\textbf{{{escape(school)}}} \\hfill {escape(dates)} \\\\")
+        elif dates:
+            lines.append(f"\\hfill {escape(dates)} \\\\")
+        if degree or gpa:
+            deg = escape(degree) if degree else ""
+            gp = f"\\textit{{{escape(gpa)}}}" if gpa else ""
+            if deg and gp:
+                lines.append(f"{deg} \\hfill {gp} \\\\")
+            elif deg:
+                lines.append(f"{deg} \\\\")
+            else:
+                lines.append(f"\\hfill {gp} \\\\")
         for b in e.get("b") or []:
             lines.append(f"{escape(_g(b, 't'))} \\\\")
         edu_blocks.append("\n".join(x for x in lines if x))
@@ -91,12 +140,30 @@ def build(data: dict, page_size: str = "LETTER", margin_in: float = 0.75) -> str
         co = _g(p, "co")
         body = [head]
         if co:
-            body.append(f"{escape(co)} \\\\")
-        bl = _bullets(p.get("b") or [])
-        if bl:
-            body.append(bl)
+            body.append(f"\\textit{{{escape(co)}}} \\\\")
+        # Prefer short one-liner from first bullet when two-column (denser)
+        bls = p.get("b") or []
+        if bls:
+            if projects_two_column and len(bls) == 1:
+                body.append(f"\\textit{{{escape(_g(bls[0], 't'))}}}")
+            else:
+                body.append(_bullets(bls))
         proj_blocks.append("\n".join(body))
-    proj_tex = "\n\n".join(proj_blocks)
+
+    if projects_two_column and len(proj_blocks) >= 2:
+        rows = []
+        for i in range(0, len(proj_blocks), 2):
+            left = proj_blocks[i]
+            right = proj_blocks[i + 1] if i + 1 < len(proj_blocks) else ""
+            rows.append(
+                "\\begin{minipage}[t]{0.48\\textwidth}\n"
+                f"{left}\n\\end{{minipage}}\\hfill\n"
+                "\\begin{minipage}[t]{0.48\\textwidth}\n"
+                f"{right}\n\\end{{minipage}}"
+            )
+        proj_tex = "\n\\vspace{4pt}\n".join(rows)
+    else:
+        proj_tex = "\n\n".join(proj_blocks)
 
     exp_blocks = []
     for e in data.get("exp") or []:
@@ -119,8 +186,8 @@ def build(data: dict, page_size: str = "LETTER", margin_in: float = 0.75) -> str
     summary = (data.get("summary") or "").strip()
     if summary:
         sections.append(f"\\section*{{Objective}}\n{escape(summary)}")
-    if data.get("skills"):
-        sections.append(f"\\section*{{Technical Skills}}\n{_skills(data['skills'])}")
+    if skills:
+        sections.append(f"\\section*{{Technical Skills}}\n{_skills(skills)}")
     if awards:
         sections.append(f"\\section*{{Achievements}}\n{_pairs(awards, sep_paren=False)}")
     if edu_tex:

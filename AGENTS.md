@@ -13,7 +13,7 @@ docker compose up --build
 # frontend :3000 · backend :8000
 ```
 
-Do **not** `npm install` or create a Python venv on the host. Rebuild images after code changes.
+Do **not** `npm install` or create a Python venv on the host. Recreate images after code changes (`docker compose up --build`).
 
 WSL note: if Hub pull fails with `error getting credentials`, remove `credsStore` from `~/.docker/config.json` (Docker Desktop often rewrites it to `desktop` / `desktop.exe`).
 
@@ -65,6 +65,19 @@ See `.env.example`. Important: `NEXT_PUBLIC_USE_MOCK=false` (default) · `SEED_D
 
 **LaTeX ATS** (`template: "latex"`): letter, ~0.75in, 10.5pt, single column, black `\titlerule`. Order: Objective → Skills → Achievements → Education → Experience → Projects → Certs → Activities.
 
+Skills must be categorized lines (`Languages: …`, `Frontend: …`), not one tech per bullet. See `.cursor/skills/tailorcv-ats-resume/`.
+
+## Agent skills
+
+Project skills live in `.cursor/skills/` (committed with the repo — any Cursor agent in this workspace can load them):
+
+| Skill | Use when |
+|-------|----------|
+| `tailorcv-ats-resume` | Resume structure, LaTeX/PDF, mashed Objective, flat skills |
+| `tailorcv-docker-workflow` | `docker compose` run, image updates, stale UI |
+
+Always-on rule `.cursor/rules/tailorcv-agent-skills.mdc` tells agents which project + Cursor skills to open for a task.
+
 ## Git hygiene
 
-Ignore: `.docker-config/`, `.env`, `docs/`, `__pycache__/`, venvs. Never commit secrets.
+Ignore: `.docker-config/`, `.env`, `docs/`, `design/`, `__pycache__/`, venvs. Never commit secrets.

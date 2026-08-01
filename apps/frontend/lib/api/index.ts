@@ -14,10 +14,16 @@ export {
   getMasterResumeId,
   ensureMasterLoaded,
   getSampleResume,
+  restructureResume,
+  aiRewriteSection,
+  aiGenerateCover,
+  aiGenerateOutreach,
+  aiMatchJd,
 } from "@/lib/api/resume";
 export {
   fetchLlmConfig,
   updateLlmConfig,
+  deleteLlmEntry,
   testLlmConnection,
   fetchSystemStatus,
   listApplications,

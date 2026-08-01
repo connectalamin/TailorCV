@@ -1,5 +1,7 @@
-# Architecture / rebuild docs (local only)
-docs/
+
+
+# Editor / agent tooling (local only)
+.cursor/
 
 # Windows/WSL download alternate-data-stream markers
 *:Zone.Identifier
@@ -12,9 +14,25 @@ docs/
 .env.*
 !.env.example
 
+# OS / editor junk
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+.idea/
+.vscode/
+!.vscode/extensions.json
+
 # Python (backend runs in Docker only — no host venv)
 **/__pycache__/
 **/*.py[cod]
 **/.venv/
 **/venv/
 apps/backend/data/
+*.db
+*.sqlite
+*.sqlite3
+
+# Next.js
+apps/frontend/.next/
+apps/frontend/out/

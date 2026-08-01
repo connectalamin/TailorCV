@@ -3,11 +3,11 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ConfirmModal } from "@/components/ui/confirm-modal";
 import {
   deleteApplication,
   deleteResume,
   fetchResumeList,
-  getMasterResumeId,
   listApplications,
   uploadMasterResume,
 } from "@/lib/api";
@@ -36,7 +36,7 @@ function timeAgo(iso?: string) {
   if (h < 24) return `${h}h ago`;
   const days = Math.floor(h / 24);
   if (days < 7) return `${days}d ago`;
-  return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 
 function IconShow() {
@@ -78,10 +78,11 @@ export default function DashboardPage() {
   const [uploading, setUploading] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<Activity | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  const load = useCallback(async (opts?: { silent?: boolean }) => {
+    if (!opts?.silent) setLoading(true);
     try {
       const [list, cols] = await Promise.all([
         fetchResumeList(true),
@@ -99,7 +100,7 @@ export default function DashboardPage() {
 
   useEffect(() => {
     void load();
-    const onFocus = () => void load();
+    const onFocus = () => void load({ silent: true });
     window.addEventListener("focus", onFocus);
     return () => window.removeEventListener("focus", onFocus);
   }, [load]);
@@ -121,7 +122,8 @@ export default function DashboardPage() {
 
   const master = resumes.find((r) => r.isMaster);
   const tailored = resumes.filter((r) => !r.isMaster);
-  const hasMaster = Boolean(master || getMasterResumeId());
+  // Do not read localStorage during render — it mismatches SSR and triggers React #418.
+  const hasMaster = Boolean(master);
   const interviews = apps.filter((a) => a.status === "interview").length;
   const avgMatch = apps.length
     ? Math.round(apps.reduce((s, a) => s + (a.match ?? 0), 0) / apps.length)
@@ -162,14 +164,15 @@ export default function DashboardPage() {
       .slice(0, 8);
   }, [apps, tailored]);
 
-  async function onDeleteRow(row: Activity) {
-    const what = row.kind === "resume" ? "resume" : "application";
-    if (!window.confirm(`Delete this ${what}?`)) return;
+  async function confirmDeleteRow() {
+    const row = pendingDelete;
+    if (!row) return;
     setBusyId(row.id);
     setError(null);
     try {
       if (row.kind === "resume") await deleteResume(row.entityId);
       else await deleteApplication(row.entityId);
+      setPendingDelete(null);
       await load();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Delete failed");
@@ -371,7 +374,7 @@ export default function DashboardPage() {
                     title="Delete"
                     aria-label="Delete"
                     disabled={busyId === row.id}
-                    onClick={() => void onDeleteRow(row)}
+                    onClick={() => setPendingDelete(row)}
                   >
                     <IconDelete />
                   </button>
@@ -390,6 +393,25 @@ export default function DashboardPage() {
           )}
         </div>
       </section>
+
+      <ConfirmModal
+        open={!!pendingDelete}
+        title={
+          pendingDelete?.kind === "application"
+            ? "Delete application?"
+            : "Delete resume?"
+        }
+        description={
+          pendingDelete
+            ? `This will permanently remove “${pendingDelete.label}”. This cannot be undone.`
+            : ""
+        }
+        busy={!!busyId && busyId === pendingDelete?.id}
+        onCancel={() => {
+          if (!busyId) setPendingDelete(null);
+        }}
+        onConfirm={() => void confirmDeleteRow()}
+      />
 
       {uploadOpen ? (
         <div

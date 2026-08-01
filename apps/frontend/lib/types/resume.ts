@@ -2,19 +2,15 @@ export type ProcessingStatus =
   | "loading"
   | "pending"
   | "processing"
+  | "preview"
   | "ready"
   | "failed";
 
+export type TailorIntensity = "light" | "balanced" | "aggressive";
+
 export type AccentColor = "teal" | "blue" | "green" | "orange" | "red";
 
-export type TemplateId =
-  | "swiss-single"
-  | "swiss-two-column"
-  | "modern"
-  | "modern-two-column"
-  | "latex"
-  | "clean"
-  | "vivid";
+export type TemplateId = "latex";
 
 export type TemplateSettings = {
   template: TemplateId;
@@ -30,6 +26,8 @@ export type TemplateSettings = {
   compact: boolean;
   showContactIcons: boolean;
   accent: AccentColor;
+  /** Projects section as two columns (preview + PDF) */
+  projectsTwoColumn: boolean;
 };
 
 export type Bullet = { t: string; d?: string };
@@ -110,7 +108,20 @@ export type LLMProvider =
   | "deepseek"
   | "ollama";
 
+export type LLMMode = "single" | "fallback";
+
+export type LLMEntry = {
+  id: string;
+  provider: LLMProvider;
+  model: string;
+  apiBase?: string;
+  hasApiKey: boolean;
+};
+
 export type LLMConfig = {
+  mode: LLMMode;
+  entries: LLMEntry[];
+  /** Legacy convenience — mirrors first entry */
   provider: LLMProvider;
   model: string;
   apiBase?: string;
@@ -126,3 +137,14 @@ export type SystemStatus = {
 };
 
 export type KeywordHit = { k: string; m: number };
+
+export type ImproveResult = {
+  resume_id: string;
+  preview_hash: string;
+  cover_letter: string;
+  outreach_message: string;
+  intensity: TailorIntensity | string;
+  keywords: KeywordHit[];
+  status: string;
+  data?: ResumeData;
+};

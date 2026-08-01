@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { ResumePreview } from "@/components/resume/resume-preview";
+import { ConfirmModal } from "@/components/ui/confirm-modal";
 import { deleteResume, downloadResumePdf, fetchResume } from "@/lib/api";
 import { DEFAULT_TEMPLATE_SETTINGS } from "@/lib/mock/data";
 import type { ResumeRecord, TemplateSettings } from "@/lib/types/resume";
@@ -27,6 +28,8 @@ export default function ResumeDetailPage() {
   const [record, setRecord] = useState<ResumeRecord | null>(null);
   const [settings, setSettings] = useState<TemplateSettings | null>(null);
   const [busy, setBusy] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -57,10 +60,16 @@ export default function ResumeDetailPage() {
     }
   }
 
-  async function onDelete() {
-    if (!confirm("Delete this resume?")) return;
-    await deleteResume(params.id);
-    router.push("/dashboard");
+  async function onConfirmDelete() {
+    setDeleting(true);
+    try {
+      await deleteResume(params.id);
+      router.push("/dashboard");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Delete failed");
+      setDeleting(false);
+      setConfirmOpen(false);
+    }
   }
 
   if (error) {
@@ -115,7 +124,11 @@ export default function ResumeDetailPage() {
           >
             Download Resume
           </button>
-          <button type="button" className="btn ghost" onClick={onDelete}>
+          <button
+            type="button"
+            className="btn ghost"
+            onClick={() => setConfirmOpen(true)}
+          >
             Delete
           </button>
         </div>
@@ -124,7 +137,9 @@ export default function ResumeDetailPage() {
       <div className="flex-1 overflow-auto bg-[radial-gradient(#D5DDDA_1px,transparent_1px)] bg-size-[18px_18px] p-8">
         <div className="mx-auto mb-3 max-w-[794px] text-center">
           <p className="font-mono text-[10px] text-sub">
-            {record.isMaster ? "Master" : "Tailored"} · {record.id}
+            {record.isMaster ? "Master" : "Tailored"}
+            {record.status === "preview" ? " · preview" : ""} ·{" "}
+            {record.title || record.id}
           </p>
           <h1 className="font-[family-name:var(--disp)] text-xl font-bold">
             {data.name}
@@ -134,6 +149,17 @@ export default function ResumeDetailPage() {
           <ResumePreview data={data} settings={settings} />
         </div>
       </div>
+
+      <ConfirmModal
+        open={confirmOpen}
+        title="Delete resume?"
+        description={`This will permanently remove “${record.title || data.name}”. This cannot be undone.`}
+        busy={deleting}
+        onCancel={() => {
+          if (!deleting) setConfirmOpen(false);
+        }}
+        onConfirm={() => void onConfirmDelete()}
+      />
     </div>
   );
 }

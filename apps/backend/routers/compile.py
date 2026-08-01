@@ -33,6 +33,9 @@ def compile_resume(body: schemas.CompileReq):
             body.data.model_dump(mode="json"),
             page_size=body.pageSize or "LETTER",
             margin_in=body.marginIn if body.marginIn is not None else 0.75,
+            projects_two_column=bool(body.projectsTwoColumn)
+            if body.projectsTwoColumn is not None
+            else True,
         )
     result = tex_compile.compile_pdf(tex)
     if not result.ok or not result.pdf:

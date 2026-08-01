@@ -10,6 +10,7 @@ import {
   type DragEvent,
 } from "react";
 import { toast } from "sonner";
+import { ConfirmModal } from "@/components/ui/confirm-modal";
 import {
   createApplication,
   deleteApplication,
@@ -31,26 +32,8 @@ function matchCls(m: number) {
   return "lo";
 }
 
-function templateTagCls(template?: string) {
-  const t = (template || "latex").toLowerCase();
-  switch (t) {
-    case "latex":
-      return "ktag-latex";
-    case "swiss-single":
-      return "ktag-swiss";
-    case "swiss-two-column":
-      return "ktag-swiss2";
-    case "modern":
-      return "ktag-modern";
-    case "modern-two-column":
-      return "ktag-modern2";
-    case "clean":
-      return "ktag-clean";
-    case "vivid":
-      return "ktag-vivid";
-    default:
-      return "ktag-default";
-  }
+function templateTagCls(_template?: string) {
+  return "ktag-latex";
 }
 
 export default function TrackerPage() {
@@ -66,6 +49,8 @@ export default function TrackerPage() {
   const [draftStatus, setDraftStatus] = useState<ApplicationStatus>("wish");
   const [draftNotes, setDraftNotes] = useState("");
   const [saving, setSaving] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const dragId = useRef<string | null>(null);
   const skipClick = useRef(false);
   const popRef = useRef<HTMLDivElement>(null);
@@ -93,11 +78,11 @@ export default function TrackerPage() {
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") setSelectedId(null);
+      if (e.key === "Escape" && !confirmDelete) setSelectedId(null);
     }
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, []);
+  }, [confirmDelete]);
 
   const stats = useMemo(() => {
     const total = apps.length;
@@ -170,13 +155,19 @@ export default function TrackerPage() {
     }
   }
 
-  async function onDeleteDetail() {
+  async function onConfirmDelete() {
     if (!selected) return;
     const label = selected.company;
-    await deleteApplication(selected.id);
-    setSelectedId(null);
-    await load();
-    toast.success(`${label} removed`);
+    setDeleting(true);
+    try {
+      await deleteApplication(selected.id);
+      setConfirmDelete(false);
+      setSelectedId(null);
+      await load();
+      toast.success(`${label} removed`);
+    } finally {
+      setDeleting(false);
+    }
   }
 
   return (
@@ -445,7 +436,7 @@ export default function TrackerPage() {
                 <button
                   type="button"
                   className="btn btn-danger"
-                  onClick={() => void onDeleteDetail()}
+                  onClick={() => setConfirmDelete(true)}
                 >
                   Delete
                 </button>
@@ -462,6 +453,21 @@ export default function TrackerPage() {
           </aside>
         </>
       ) : null}
+
+      <ConfirmModal
+        open={confirmDelete && !!selected}
+        title="Delete application?"
+        description={
+          selected
+            ? `This will permanently remove “${selected.company} — ${selected.role}”. This cannot be undone.`
+            : ""
+        }
+        busy={deleting}
+        onCancel={() => {
+          if (!deleting) setConfirmDelete(false);
+        }}
+        onConfirm={() => void onConfirmDelete()}
+      />
     </div>
   );
 }

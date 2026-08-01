@@ -19,7 +19,29 @@ CREATE TABLE IF NOT EXISTS resumes (
   job_description TEXT,
   cover_letter    TEXT,
   outreach_message TEXT,
-  preview_hash    TEXT
+  preview_hash    TEXT,
+  intensity       TEXT,
+  parent_id       TEXT
+);
+
+CREATE TABLE IF NOT EXISTS jobs (
+  id          TEXT PRIMARY KEY,
+  resume_id   TEXT,
+  description TEXT NOT NULL,
+  keywords_json TEXT,
+  company     TEXT,
+  role        TEXT,
+  created_at  TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS improvements (
+  id              TEXT PRIMARY KEY,
+  original_id     TEXT NOT NULL,
+  tailored_id     TEXT NOT NULL,
+  job_id          TEXT,
+  intensity       TEXT,
+  preview_hash    TEXT,
+  created_at      TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS applications (
@@ -42,10 +64,19 @@ CREATE TABLE IF NOT EXISTS settings (
 """
 
 
+def _migrate(conn: sqlite3.Connection) -> None:
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(resumes)").fetchall()}
+    if "intensity" not in cols:
+        conn.execute("ALTER TABLE resumes ADD COLUMN intensity TEXT")
+    if "parent_id" not in cols:
+        conn.execute("ALTER TABLE resumes ADD COLUMN parent_id TEXT")
+
+
 def init_db() -> None:
     os.makedirs(config.DATA_DIR, exist_ok=True)
     with _connect() as conn:
         conn.executescript(SCHEMA)
+        _migrate(conn)
         conn.commit()
 
 

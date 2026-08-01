@@ -34,3 +34,9 @@ Set `NEXT_PUBLIC_USE_MOCK=true` only if you want the old in-browser localStorage
 6. **Settings** — LLM / preferences  
 
 LLM keys are configured in **Settings** (stored in the backend SQLite volume).
+
+Sample resume content under `examples/` and the mock seed data are **fictional**.
+
+## License
+
+MIT — see [`LICENSE`](LICENSE).
