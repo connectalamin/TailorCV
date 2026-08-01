@@ -188,6 +188,11 @@ export type AiMatchResult = {
   missingSkills: string[];
   categories: AiMatchCategory[];
   source?: "llm" | "keyword";
+  keywordSource?: "ai" | "local";
+  entryLevel?: boolean;
+  softSkillsNote?: string;
+  softSkillsInJd?: string[];
+  softSkillsMissing?: string[];
 };
 
 export type ImproveResult = {

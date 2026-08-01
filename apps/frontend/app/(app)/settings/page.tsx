@@ -36,6 +36,7 @@ const OP_LABELS: Record<string, string> = {
   keywords: "Keyword extract",
   job_meta: "Job metadata",
   ats: "ATS match",
+  ats_coach: "ATS coach",
   aux: "Cover / outreach",
   content_check: "Content check",
   content_fix: "Content fix",
@@ -44,10 +45,20 @@ const OP_LABELS: Record<string, string> = {
 };
 
 function formatTokens(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 10_000) return `${(n / 1000).toFixed(1)}k`;
-  if (n >= 1000) return `${(n / 1000).toFixed(2)}k`;
-  return String(n);
+  const v = Math.max(0, Math.round(Number(n) || 0));
+  if (v >= 1_000_000) {
+    const m = v / 1_000_000;
+    return `${m >= 10 ? m.toFixed(0) : m.toFixed(1)}M`;
+  }
+  if (v >= 1000) {
+    const k = v / 1000;
+    return `${k >= 100 ? k.toFixed(0) : k.toFixed(1)}k`;
+  }
+  return v.toLocaleString();
+}
+
+function formatCalls(n: number): string {
+  return Math.max(0, Math.round(Number(n) || 0)).toLocaleString();
 }
 
 function formatWhen(iso: string | null | undefined): string {
@@ -655,11 +666,21 @@ export default function SettingsPage() {
                   <div className="settings-section">
                     <p className="t-caption mb-2">By operation</p>
                     <div className="ai-stats-table">
+                      <div className="ai-stats-row ai-stats-head">
+                        <span>Operation</span>
+                        <span className="ai-stats-metrics">
+                          <span>Calls</span>
+                          <span>Tokens</span>
+                        </span>
+                      </div>
                       {opRows.map(([op, row]) => (
                         <div key={op} className="ai-stats-row">
-                          <span>{OP_LABELS[op] || op}</span>
-                          <span className="t-mono">
-                            {row.calls} · {formatTokens(row.tokens)} tok
+                          <span className="ai-stats-label">
+                            {OP_LABELS[op] || op}
+                          </span>
+                          <span className="ai-stats-metrics t-mono">
+                            <span>{formatCalls(row.calls)}</span>
+                            <span>{formatTokens(row.tokens)}</span>
                           </span>
                         </div>
                       ))}
@@ -671,19 +692,27 @@ export default function SettingsPage() {
                   <div className="settings-section">
                     <p className="t-caption mb-2">By provider</p>
                     <div className="ai-stats-table">
+                      <div className="ai-stats-row ai-stats-head">
+                        <span>Provider</span>
+                        <span className="ai-stats-metrics">
+                          <span>Calls</span>
+                          <span>Tokens</span>
+                        </span>
+                      </div>
                       {provRows.map(([prov, row]) => (
                         <div key={prov} className="ai-stats-row">
-                          <span>
+                          <span className="ai-stats-label">
                             {PROVIDER_INFO[prov as LLMProvider]?.name || prov}
                             {row.model ? (
-                              <span className="t-mono text-[var(--text-muted)]">
+                              <span className="ai-stats-model">
                                 {" "}
                                 · {row.model}
                               </span>
                             ) : null}
                           </span>
-                          <span className="t-mono">
-                            {row.calls} · {formatTokens(row.tokens)} tok
+                          <span className="ai-stats-metrics t-mono">
+                            <span>{formatCalls(row.calls)}</span>
+                            <span>{formatTokens(row.tokens)}</span>
                           </span>
                         </div>
                       ))}

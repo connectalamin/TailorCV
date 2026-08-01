@@ -296,6 +296,12 @@ class AiMatchOut(BaseModel):
     categories: list[AiMatchCategory] = Field(default_factory=list)
     # "llm" = official AI verdict; "keyword" = local fallback only
     source: Literal["llm", "keyword"] = "llm"
+    # How JD skill keywords were extracted for coverage evidence
+    keywordSource: Literal["ai", "local"] = "local"
+    entryLevel: bool = False
+    softSkillsNote: str = ""
+    softSkillsInJd: list[str] = Field(default_factory=list)
+    softSkillsMissing: list[str] = Field(default_factory=list)
 
 
 class AiContentCheckReq(BaseModel):

@@ -353,44 +353,87 @@ def structure_with_retry(text: str, cfg: dict) -> Optional[dict]:
     return None
 
 
+_ATS_KEYWORD_EXTRACT_SYSTEM = """You are an expert ATS keyword extractor. Extract ONLY hard skills, technical tools, platforms, and domain-specific competencies from a job description.
+
+INCLUDE:
+- Languages, frameworks, libraries, tools, platforms, databases
+- Methodologies when skill-like (Agile, Scrum, CI/CD, SEO, SEM, TDD)
+- Domain skills (Microservices, REST APIs, MCQ for EdTech, Financial Modeling, etc.)
+- Certifications and standards (PMP, AWS Certified, GDPR, HIPAA)
+
+EXCLUDE (critical):
+- Soft skills (communication, teamwork, leadership, problem-solving, analytical, creativity)
+- Generic nouns alone (platform, product, form, application, system, tool, solution, service)
+- Education/eligibility (CSE, non-CSE, graduate, fresher, Bachelor's, B.Tech)
+- Level/tenure (junior, senior, entry-level, 3+ years)
+- Employment terms (full-time, remote, salary, benefits)
+- Culture fluff (self-starter, fast-paced, passionate)
+- Application instructions ("fill the form", "apply now", "join meetings")
+
+Context:
+- "form" in "fill the form" → exclude; "React Hook Form" / form validation → include
+- bare "platform" → exclude; "Salesforce Platform" → include
+- CSE / non-CSE → exclude
+- MCQ → include when used as an assessment type
+
+Return ONLY JSON: {"keywords":["skill1","skill2",...]}
+Prefer lowercase; keep known acronyms uppercase (AWS, SQL, SEO, CMS, MCQ).
+Max 24 items. No explanations."""
+
+
 def extract_keywords(jd: str, cfg: dict) -> Optional[list[dict]]:
+    """AI hard-skill extraction → [{k, m}, ...]. Validated by caller via stop-list."""
     if not is_configured(cfg) or not jd.strip():
         return None
     msgs = [
+        {"role": "system", "content": _ATS_KEYWORD_EXTRACT_SYSTEM},
         {
-            "role": "system",
+            "role": "user",
             "content": (
-                "Extract the most important hiring keywords from a job description. "
-                "Return ONLY JSON: {\"keywords\":[{\"k\":\"Term\",\"m\":90},...]} "
-                "k is the keyword/phrase, m is importance 50-99. Max 15 items. No prose."
+                "Extract hard skills from this job description.\n\n"
+                f"{jd[:5500]}"
             ),
         },
-        {"role": "user", "content": jd[:5000]},
     ]
     with track_operation("keywords"):
-        raw = _complete_json_text(cfg, msgs, max_tokens=800)
+        raw = _complete_json_text(cfg, msgs, max_tokens=700)
     if not raw:
         return None
     try:
         obj = json.loads(_strip_fence(raw))
-        items = obj.get("keywords") if isinstance(obj, dict) else None
-        if not isinstance(items, list):
-            return None
-        out: list[dict] = []
-        for it in items:
-            if not isinstance(it, dict):
-                continue
-            k = str(it.get("k") or "").strip()
-            if not k:
-                continue
-            try:
-                m = int(it.get("m") or 70)
-            except (TypeError, ValueError):
-                m = 70
-            out.append({"k": k, "m": max(50, min(99, m))})
-        return out[:15] or None
     except json.JSONDecodeError:
         return None
+
+    items: list[Any] = []
+    if isinstance(obj, list):
+        items = obj
+    elif isinstance(obj, dict):
+        raw_items = obj.get("keywords") or obj.get("skills") or obj.get("items")
+        if isinstance(raw_items, list):
+            items = raw_items
+
+    out: list[dict] = []
+    seen: set[str] = set()
+    for i, it in enumerate(items):
+        if isinstance(it, dict):
+            k = str(it.get("k") or it.get("skill") or it.get("name") or "").strip()
+            try:
+                m = int(it.get("m") or max(55, 96 - i * 2))
+            except (TypeError, ValueError):
+                m = max(55, 96 - i * 2)
+        else:
+            k = str(it or "").strip()
+            m = max(55, 96 - i * 2)
+        if not k:
+            continue
+        key = k.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append({"k": k, "m": max(50, min(99, m))})
+        if len(out) >= 24:
+            break
+    return out or None
 
 
 def extract_job_metadata(jd: str, cfg: dict) -> Optional[dict]:
@@ -414,8 +457,10 @@ def extract_job_metadata(jd: str, cfg: dict) -> Optional[dict]:
                 "- type: full-time, part-time, contract, or internship. Null if not mentioned.\n"
                 "- salary: compensation amount/range as written (include currency/period if present). "
                 "Null if not mentioned.\n"
-                "- deadline: application deadline as written. Null if not mentioned.\n"
-                "- startDate: expected start date as written. Null if not mentioned.\n"
+                "- deadline: application deadline as YYYY-MM-DD when a concrete date is given. "
+                "Null for vague phrases (rolling, ASAP) or if not mentioned.\n"
+                "- startDate: expected start date as YYYY-MM-DD when a concrete date is given. "
+                "Null for vague phrases (ASAP, immediate, Q4) or if not mentioned.\n"
                 "Do not guess. Use JSON null for unknown fields. Output the full object — never truncate."
             ),
         },
@@ -1008,7 +1053,7 @@ def ats_coach(
     plain = parser_svc.data_to_plain_text(data)[:7000]
     gap = ", ".join(str(s).strip() for s in (missing_skills or [])[:16] if str(s).strip())
     hist_lines: list[str] = []
-    for turn in (history or [])[-6]:
+    for turn in (history or [])[-6:]:
         if not isinstance(turn, dict):
             continue
         role = str(turn.get("role") or "").strip().lower()

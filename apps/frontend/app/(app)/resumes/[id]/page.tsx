@@ -137,7 +137,7 @@ export default function ResumeDetailPage() {
       <div className="flex-1 overflow-auto bg-[radial-gradient(#D5DDDA_1px,transparent_1px)] bg-size-[18px_18px] p-8">
         <div className="mx-auto mb-3 max-w-[794px] text-center">
           <p className="font-mono text-[10px] text-sub">
-            {record.isMaster ? "Master" : "Tailored"}
+            {record.isMaster ? "Master resume" : "Tailored resume"}
             {record.status === "preview" ? " · preview" : ""} ·{" "}
             {record.title || record.id}
           </p>

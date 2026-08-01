@@ -54,12 +54,33 @@ def preview_hash_for(payload: dict) -> str:
 
 
 def extract_job_keywords(jd: str, cfg: dict) -> list[dict]:
-    """LLM keywords when configured; regex fallback otherwise."""
-    if llm_svc.is_configured(cfg) and jd.strip():
-        llm_hits = llm_svc.extract_keywords(jd, cfg)
+    """
+    AI-primary hard-skill extraction with local pattern fallback.
+    Returns KeywordHit-shaped dicts [{k, m}, ...].
+    """
+    keys, _source = extract_jd_skill_list(jd, cfg)
+    return kw_svc.hits_from_keywords(keys)
+
+
+def extract_jd_skill_list(jd: str, cfg: dict) -> tuple[list[str], str]:
+    """
+    Plain skill strings + source ('ai'|'local').
+    Primary: LLM extract → stop-list / context validation.
+    Fallback: local extract_overlap_keywords when AI unavailable or <3 skills.
+    """
+    text = (jd or "").strip()
+    if not text:
+        return [], "local"
+
+    if llm_svc.is_configured(cfg):
+        llm_hits = llm_svc.extract_keywords(text, cfg)
         if llm_hits:
-            return llm_hits
-    return kw_svc.extract(jd)
+            raw = [str(h.get("k") or "").strip() for h in llm_hits if h.get("k")]
+            validated = kw_svc.validate_extracted_keywords(raw, text, limit=24)
+            if len(validated) >= 3:
+                return validated, "ai"
+
+    return kw_svc.extract_overlap_keywords(text, limit=40), "local"
 
 
 def extract_job_metadata(jd: str, cfg: dict) -> dict:

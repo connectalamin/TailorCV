@@ -14,6 +14,9 @@ __all__ = [
     "score_overlap",
     "extract",
     "is_skill_keyword",
+    "entry_level_soft_skills",
+    "validate_extracted_keywords",
+    "hits_from_keywords",
 ]
 
 
@@ -134,7 +137,7 @@ _STOP: frozenset[str] = frozenset({
     "compulsory", "obligatory", "prerequisite", "prerequisites",
     "qualification", "qualifications", "qualified", "eligible", "eligibility",
     "criteria", "criterion", "standard", "standards", "benchmark",
-    "benchmarks", "metric", "metrics", "kpi", "kpis", "okrs", "okr",
+    "benchmarks", "metric", "metrics",
     "goal", "goals", "objective", "objectives", "target", "targets",
     "mission", "missions", "vision", "visions", "value", "values",
     "culture", "cultures", "environment", "environments", "atmosphere",
@@ -169,6 +172,11 @@ _STOP: frozenset[str] = frozenset({
     "fast", "pace", "paced", "busy", "tight", "deadline", "deadlines",
     "start", "starts", "starting", "started", "join", "joining", "joined",
     "offer", "offers", "offering", "offered", "package", "packages",
+    # Generic nouns / eligibility — not hard skills
+    "form", "forms", "platform", "platforms", "product", "products",
+    "cse", "non-cse", "noncse", "graduate", "graduates", "fresh",
+    "fresher", "freshers", "undergrad", "undergraduate", "bachelor",
+    "bachelors", "degree", "degrees", "eligibility", "eligible",
 })
 
 
@@ -322,11 +330,39 @@ _TECH_ALLOWLIST: frozenset[str] = frozenset({
     "shader", "compute", "raytracing", "dlss", "fsr", "taa", "ssao",
     # CMS / E-commerce / domain
     "cms", "headless", "headlesscms", "edtech", "fintech", "healthtech",
+    "martech", "adtech", "biotech", "cleantech",
     "wordpress", "drupal", "joomla", "magento", "shopify", "bigcommerce",
     "woocommerce", "prestashop", "opencart", "shopware", "sylius",
     "strapi", "contentful", "sanity", "prismic", "dato", "ghost",
     "keystone", "directus", "payload", "apostrophe", "cockpit",
     "netlifycms", "decap", "tina", "forestry",
+    # Business / marketing / finance hard skills (not soft fluff)
+    "seo", "sem", "ppc", "cpc", "cpm", "ctr", "cvr", "roi", "roas",
+    "kpi", "kpis", "okr", "okrs", "crm", "erp", "hris", "ats",
+    "gaap", "ifrs", "pnl", "ebitda", "arr", "mrr", "ltv", "cac",
+    "nps", "csat", "b2b", "b2c", "b2g", "saas", "paas", "iaas",
+    "hubspot", "salesforce", "marketo", "mailchimp", "klaviyo",
+    "braze", "segment", "mixpanel", "amplitude", "hotjar", "optimizely",
+    "ga4", "gtm", "ahrefs", "semrush", "moz", "screamingfrog",
+    "lookerstudio", "googleanalytics", "googleads", "metaads",
+    "linkedinads", "tiktokads", "programmatic", "dsp", "ssp",
+    "quickbooks", "xero", "netsuite", "sap", "oracleerp", "workday",
+    "tableau", "powerbi", "looker", "excel", "sheets", "vlookup",
+    "pivot", "pivottables", "financialmodeling", "forecasting",
+    "underwriting", "actuarial", "bloomberg", "capm", "wacc",
+    "scrum", "kanban", "jira", "confluence", "asana", "notion",
+    "pmp", "prince2", "sixsigma", "lean", "itil",
+    "copywriting", "contentstrategy", "brandstrategy", "gohighlevel",
+    "rpa", "project-management", "product-management",
+    "digital-marketing", "content-marketing", "growth-marketing",
+    "performance-marketing", "email-marketing", "paid-search",
+    "paid-social", "marketing-automation", "financial-modeling",
+    # Assessment / hiring-domain + soft-hard hybrids (explicit JD requirements)
+    "mcq", "mcqs", "problem-solving", "problemsolving",
+    "communication-skills", "analytical-skills", "typeorm", "sqlalchemy",
+    # EdTech / learning-product domain
+    "assessment", "assessments", "quiz", "quizzes", "lms", "scorm",
+    "moodle", "canvaslms", "coursera", "udemy", "skillsoft",
     # Design / Creative
     "figma", "sketch", "adobe", "photoshop", "illustrator", "indesign",
     "aftereffects", "premiere", "xd", "lightroom", "audition",
@@ -446,9 +482,15 @@ _PHRASE_RE = re.compile(
     r"security\s+information|identity\s+management|zero\s+trust|"
     r"static\s+analysis|dynamic\s+analysis|software\s+bill\s+of\s+materials|"
     r"extended\s+detection|endpoint\s+detection|threat\s+intelligence|"
-    # Other
+    # Other / business domains
     r"search\s+engine\s+optimization|customer\s+relationship\s+management|"
     r"enterprise\s+resource\s+planning|robotic\s+process\s+automation|"
+    r"google\s+analytics|google\s+ads|meta\s+ads|project\s+management|"
+    r"product\s+management|digital\s+marketing|content\s+marketing|"
+    r"growth\s+marketing|performance\s+marketing|email\s+marketing|"
+    r"paid\s+search|paid\s+social|marketing\s+automation|"
+    r"financial\s+modeling|profit\s+and\s+loss|p\s*&\s*l|"
+    r"problem[\s-]+solving|communication\s+skills|analytical\s+skills|"
     r"low[\s-]?code|no[\s-]?code|smart\s+contract|block\s*chain|web\s*3"
     r")\b",
     re.IGNORECASE,
@@ -470,6 +512,28 @@ def _norm_phrase(p: str) -> str:
     p = p.replace("back end", "backend").replace("back-end", "backend")
     p = p.replace("full stack", "fullstack").replace("full-stack", "fullstack")
     p = p.replace("dev ops", "devops").replace("ci / cd", "ci/cd")
+    p = p.replace("search engine optimization", "seo")
+    p = p.replace("customer relationship management", "crm")
+    p = p.replace("enterprise resource planning", "erp")
+    p = p.replace("robotic process automation", "rpa")
+    p = p.replace("google analytics", "googleanalytics")
+    p = p.replace("google ads", "googleads")
+    p = p.replace("meta ads", "metaads")
+    p = p.replace("project management", "project-management")
+    p = p.replace("product management", "product-management")
+    p = p.replace("digital marketing", "digital-marketing")
+    p = p.replace("content marketing", "content-marketing")
+    p = p.replace("growth marketing", "growth-marketing")
+    p = p.replace("performance marketing", "performance-marketing")
+    p = p.replace("email marketing", "email-marketing")
+    p = p.replace("paid search", "paid-search")
+    p = p.replace("paid social", "paid-social")
+    p = p.replace("marketing automation", "marketing-automation")
+    p = p.replace("financial modeling", "financial-modeling")
+    p = p.replace("profit and loss", "pnl").replace("p & l", "pnl").replace("p&l", "pnl")
+    p = p.replace("problem solving", "problem-solving")
+    p = p.replace("communication skills", "communication-skills")
+    p = p.replace("analytical skills", "analytical-skills")
     return p.strip()
 
 
@@ -484,24 +548,24 @@ def _looks_technical(tok: str) -> bool:
     compact = t.replace(".", "").replace(" ", "").replace("-", "").replace("/", "")
     if compact in _TECH_ALLOWLIST:
         return True
-    # Domain / degree shorthand with hyphen that isn't soft fluff (e.g. non-cse)
+    # Hyphenated tech only when a side is allowlisted (ci-cd via allowlist/phrases;
+    # do NOT treat non-cse / educational tags as skills)
     if "-" in t and t not in _SOFT_COMPOUND:
         left, _, right = t.partition("-")
         if left in _TECH_ALLOWLIST or right in _TECH_ALLOWLIST:
             return True
-        # Short hyphenated tokens like non-cse, ci-cd-ish
-        if 3 <= len(t) <= 16 and re.fullmatch(r"[a-z0-9]+-[a-z0-9]+", t):
-            # Reject soft compounds; allow domain tags
-            if left in {"non", "anti", "pre", "post", "multi"} and len(right) >= 2:
-                return True
+        if compact in _TECH_ALLOWLIST:
+            return True
     # Tech sigils (not bare hyphen fluff)
     if any(c in t for c in ".#+/"):
         return True
     # Versioned tech: e.g., css3, html5, es6, python3
     if len(t) >= 2 and t[-1].isdigit() and t[:-1] in _TECH_ALLOWLIST:
         return True
-    # Common skill suffixes
-    if re.search(r"(js|sql|db|api|css|orm|cli|sdk|ml|ui|ux)$", t) and len(t) >= 3:
+    # Common skill suffixes — avoid "form" matching "...orm"
+    if re.search(r"(js|sql|db|api|css|cli|sdk|ml|ui|ux)$", t) and len(t) >= 3:
+        return True
+    if t == "orm" or (t.endswith("orm") and len(t) >= 5):
         return True
     return False
 
@@ -514,6 +578,78 @@ def is_skill_keyword(tok: str) -> bool:
     if t in _STOP or t in _SOFT_COMPOUND:
         return False
     return _looks_technical(t)
+
+
+_ENTRY_LEVEL_RE = re.compile(
+    r"\b(jr\.?|junior|entry[\s-]?level|fresher|freshers|fresh\s+graduate|"
+    r"new\s+grad|graduate\s+role|campus\s+hire|intern(?:ship)?)\b",
+    re.I,
+)
+
+_SOFT_REQUIREMENT_PHRASES: tuple[tuple[str, str], ...] = (
+    ("problem-solving", r"problem[\s-]+solving"),
+    ("communication-skills", r"communication\s+skills|\bcommunication\b"),
+    ("analytical-skills", r"analytical\s+skills|\banalytical\b"),
+    ("teamwork", r"\bteamwork\b|team\s+player"),
+    ("learning-agility", r"quick\s+learner|eager\s+to\s+learn|learning\s+agility"),
+)
+
+
+def entry_level_soft_skills(jd: str, resume_plain: str = "") -> dict[str, Any]:
+    """
+    For junior/entry JDs, surface soft-skill requirements separately.
+    Does not affect technical keyword coverage score.
+    """
+    text = jd or ""
+    is_entry = bool(_ENTRY_LEVEL_RE.search(text))
+    if not is_entry:
+        return {
+            "is_entry_level": False,
+            "in_jd": [],
+            "matched": [],
+            "missing": [],
+            "note": "",
+        }
+
+    plain = (resume_plain or "").lower()
+    in_jd: list[str] = []
+    matched: list[str] = []
+    missing: list[str] = []
+    for label, pattern in _SOFT_REQUIREMENT_PHRASES:
+        if not re.search(pattern, text, re.I):
+            continue
+        in_jd.append(label)
+        # Resume may store hyphenated or spaced forms
+        needle = label.replace("-", " ")
+        hit = (
+            label in plain
+            or needle in plain
+            or label.replace("-", "") in plain.replace("-", "").replace(" ", "")
+        )
+        if hit:
+            matched.append(label)
+        else:
+            missing.append(label)
+
+    note = ""
+    if in_jd:
+        note = (
+            "Junior/entry role — soft requirements flagged separately "
+            f"({', '.join(in_jd)}). They don’t replace tool/stack coverage."
+        )
+    else:
+        note = (
+            "Junior/entry role detected — prioritize stack keywords; "
+            "add soft skills the JD emphasizes only if truthful."
+        )
+
+    return {
+        "is_entry_level": True,
+        "in_jd": in_jd,
+        "matched": matched,
+        "missing": missing,
+        "note": note,
+    }
 
 def _token_in_resume(tok: str, plain: str) -> bool:
     """
@@ -597,11 +733,8 @@ def extract_overlap_keywords(jd: str, limit: int = 40) -> list[str]:
     # 2. Token extraction — skill-like only (no long common-word padding)
     tokens: list[str] = []
     for m in _TOKEN_RE.finditer(plain):
-        t = m.group().lower()
-        # Drop trailing sentence punctuation glued to tokens ("React." → "react")
-        if re.fullmatch(r"[a-z0-9+#\-]+\.", t):
-            t = t[:-1]
-        if t in _STOP or t in _SOFT_COMPOUND:
+        t = m.group().lower().rstrip(".,;:)")
+        if not t or t in _STOP or t in _SOFT_COMPOUND:
             continue
         if len(t) < 2:
             continue
@@ -730,6 +863,71 @@ def resume_to_plain(data: dict[str, Any] | None) -> str:
     return " ".join(parts).lower()
 
 
+def validate_extracted_keywords(
+    keywords: list[str],
+    jd: str = "",
+    *,
+    limit: int = 40,
+) -> list[str]:
+    """
+    Post-filter AI (or any) keyword list with stop-list + context false-positive checks.
+    Does not require the tech allowlist — AI may surface valid niche skills.
+    """
+    jd_lower = (jd or "").lower()
+    # Generic terms that are noise unless they appear in a skill-like context
+    context_exclude: dict[str, tuple[str, ...]] = {
+        "form": ("fill the form", "submit form", "application form", "google form"),
+        "forms": ("fill the form", "submit form", "application form"),
+        "platform": ("our platform", "the platform", "edtech platform", "learning platform"),
+        "product": ("our product", "real product", "the product"),
+        "system": ("our system", "the system"),
+        "application": ("job application", "submit application"),
+    }
+
+    out: list[str] = []
+    seen: set[str] = set()
+    for raw in keywords:
+        k = _norm_phrase(str(raw or "").strip())
+        if not k or len(k) < 2:
+            continue
+        low = k.lower()
+        if low in _STOP or low in _SOFT_COMPOUND:
+            continue
+        # Soft-skill phrases AI sometimes still emits
+        if low in {
+            "communication",
+            "teamwork",
+            "leadership",
+            "problem-solving",
+            "problemsolving",
+            "analytical",
+            "analytical-skills",
+            "communication-skills",
+            "creativity",
+            "adaptability",
+        }:
+            continue
+        bad_ctx = context_exclude.get(low)
+        if bad_ctx and any(ctx in jd_lower for ctx in bad_ctx):
+            continue
+        if low in seen:
+            continue
+        seen.add(low)
+        out.append(k)
+        if len(out) >= limit:
+            break
+    return out
+
+
+def hits_from_keywords(keywords: list[str]) -> list[dict[str, Any]]:
+    """Convert plain skill strings → KeywordHit-shaped dicts for UI/LLM panels."""
+    hits: list[dict[str, Any]] = []
+    for i, k in enumerate(keywords):
+        label = _display_label(k)
+        hits.append({"k": label, "m": max(55, 96 - i * 2)})
+    return hits
+
+
 def score_overlap(
     data: dict[str, Any] | None = None,
     jd: str = "",
@@ -742,6 +940,10 @@ def score_overlap(
       score_overlap(data, jd)           # TailorCV
       score_overlap(jd=..., resume=...)
       score_overlap(jd, resume)         # kimi legacy when first arg is str
+
+    Optional kwargs:
+      keywords: precomputed skill list (AI or local)
+      keyword_source: "ai" | "local"
     """
     resume = data
     job = jd
@@ -755,7 +957,14 @@ def score_overlap(
         resume = kwargs.get("resume")
 
     plain = resume_to_plain(resume if isinstance(resume, dict) else None)
-    keywords = extract_overlap_keywords(job or "", limit=40)
+    pre = kwargs.get("keywords")
+    if isinstance(pre, list) and pre:
+        keywords = [str(k).strip() for k in pre if str(k).strip()]
+        keyword_source = str(kwargs.get("keyword_source") or "ai")
+    else:
+        keywords = extract_overlap_keywords(job or "", limit=40)
+        keyword_source = "local"
+
     if not keywords:
         return {
             "score": 0.0,
@@ -765,6 +974,7 @@ def score_overlap(
             "missing": [],
             "keywords": [],
             "total_keywords": 0,
+            "keyword_source": keyword_source,
         }
 
     matched: list[str] = []
@@ -786,6 +996,7 @@ def score_overlap(
         "missing": missing,
         "keywords": keywords,
         "total_keywords": total,
+        "keyword_source": keyword_source,
     }
 
 

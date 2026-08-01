@@ -361,31 +361,19 @@ def ai_match(
         rec.get("data") or {}
     )
 
-    # Local extractor first — instant evidence + LLM prompt enrichment.
-    heuristic = kw_svc.score_overlap(data, jd)
+    # AI-primary skill list (local fallback) → coverage evidence for ATS score.
+    skill_keys, keyword_source = improver.extract_jd_skill_list(jd, cfg)
+    heuristic = kw_svc.score_overlap(
+        data, jd, keywords=skill_keys, keyword_source=keyword_source
+    )
     heuristic_rate = int(heuristic.get("rate") or 0)
     local_keywords = list(heuristic.get("keywords") or [])
     local_matched = list(heuristic.get("matched") or heuristic.get("matches") or [])
-    local_missing = [
-        str(k)
-        for k in (heuristic.get("missing") or [])
-        if kw_svc.is_skill_keyword(str(k))
-    ]
+    local_missing = list(heuristic.get("missing") or [])
     keyword_total = int(heuristic.get("total_keywords") or len(local_keywords))
     keyword_found = len(local_matched)
 
-    # Prefer local skill list for UI keywords; fall back to improver/LLM extract.
-    panel_hits = [
-        h
-        for h in kw_svc.extract(jd)
-        if isinstance(h, dict) and kw_svc.is_skill_keyword(str(h.get("k") or ""))
-    ]
-    if not panel_hits:
-        panel_hits = [
-            h
-            for h in improver.extract_job_keywords(jd, cfg)
-            if isinstance(h, dict) and kw_svc.is_skill_keyword(str(h.get("k") or ""))
-        ]
+    panel_hits = kw_svc.hits_from_keywords(local_keywords)
 
     source: str = "keyword"
     score = heuristic_rate
@@ -416,18 +404,15 @@ def ai_match(
                 s = str(raw).strip()
                 if not s:
                     continue
-                # Drop fluff; keep skill tokens or multi-word phrases that contain one
                 parts = [p for p in re.split(r"[\s,/|]+", s.lower()) if p]
-                if not (
-                    kw_svc.is_skill_keyword(s)
-                    or any(kw_svc.is_skill_keyword(p) for p in parts)
-                ):
+                # Accept AI missing skills after stop-list validation
+                validated = kw_svc.validate_extracted_keywords([s], jd, limit=1)
+                if not validated and not any(kw_svc.is_skill_keyword(p) for p in parts):
                     continue
                 if s not in llm_missing:
-                    llm_missing.append(s)
+                    llm_missing.append(validated[0] if validated else s)
                 if len(llm_missing) >= 12:
                     break
-            # Prefer local missing for the skills-gap list (precise); LLM notes for nuance.
             if llm_missing:
                 merged = list(local_missing[:10])
                 for s in llm_missing:
@@ -474,6 +459,8 @@ def ai_match(
         storage.update_resume(db, rid, {"jobDescription": jd})
     storage.set_applications_match(db, rid, score)
 
+    soft = kw_svc.entry_level_soft_skills(jd, kw_svc.resume_to_plain(data))
+
     return schemas.AiMatchOut(
         keywords=[schemas.KeywordHit(**h) for h in panel_hits],
         notes=notes,
@@ -485,6 +472,11 @@ def ai_match(
         missingSkills=missing_skills,
         categories=categories,
         source=source,  # type: ignore[arg-type]
+        keywordSource=keyword_source if keyword_source in ("ai", "local") else "local",  # type: ignore[arg-type]
+        entryLevel=bool(soft.get("is_entry_level")),
+        softSkillsNote=str(soft.get("note") or ""),
+        softSkillsInJd=[str(x) for x in (soft.get("in_jd") or [])],
+        softSkillsMissing=[str(x) for x in (soft.get("missing") or [])],
     )
 
 

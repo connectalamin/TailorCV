@@ -21,7 +21,6 @@ import {
   aiGenerateCover,
   aiGenerateOutreach,
   aiMatchJd,
-  aiRewriteSection,
   downloadResumePdf,
   fetchResume,
   getSampleResume,
@@ -121,6 +120,11 @@ export default function BuilderClient() {
   const [aiCategories, setAiCategories] = useState<AiMatchCategory[]>([]);
   const [aiMissingSkills, setAiMissingSkills] = useState<string[]>([]);
   const [aiSource, setAiSource] = useState<"llm" | "keyword" | null>(null);
+  const [keywordSource, setKeywordSource] = useState<"ai" | "local" | null>(
+    null,
+  );
+  const [entryLevelNote, setEntryLevelNote] = useState("");
+  const [softSkillsMissing, setSoftSkillsMissing] = useState<string[]>([]);
   const [contentCheck, setContentCheck] = useState<ContentCheckResult | null>(
     null,
   );
@@ -394,6 +398,13 @@ export default function BuilderClient() {
       setAiCategories(res.categories || []);
       setAiMissingSkills(res.missingSkills || []);
       setAiSource(res.source === "keyword" ? "keyword" : "llm");
+      setKeywordSource(
+        res.keywordSource === "ai" || res.keywordSource === "local"
+          ? res.keywordSource
+          : null,
+      );
+      setEntryLevelNote(res.softSkillsNote || "");
+      setSoftSkillsMissing(res.softSkillsMissing || []);
       lastAtsKeyRef.current = key;
       if (!opts?.silent) toast.success("ATS fit updated");
     } catch (e) {
@@ -401,27 +412,6 @@ export default function BuilderClient() {
       toast.error(e instanceof Error ? e.message : "AI ATS check failed");
     } finally {
       if (req === atsReqRef.current) setAiBusy(false);
-    }
-  }
-
-  async function onApplyMatchSuggestions() {
-    if (!aiKeywords.length) {
-      toast.message("Wait for ATS fit analysis first");
-      return;
-    }
-    const next = await runAi("Suggestions applied", () =>
-      aiRewriteSection(id!, "skills", { jd, data, intensity: "balanced" }),
-    );
-    if (next) {
-      setData(next);
-      const obj = await aiRewriteSection(id!, "summary", {
-        jd,
-        data: next,
-        intensity: "balanced",
-      }).catch(() => null);
-      if (obj) setData(obj);
-      lastAtsKeyRef.current = "";
-      void onAiMatch({ silent: true });
     }
   }
 
@@ -994,115 +984,118 @@ export default function BuilderClient() {
           ) : null}
 
           {tab === "jd" ? (
-            <div className="flex h-full flex-col gap-3 p-4">
-              <div>
-                <p className="t-caption">Target job</p>
-                <p className="t-body-sm mt-1 text-[var(--text-secondary)]">
-                  Paste the posting — skills extract instantly; ATS fit score
-                  comes from your LLM (Settings).
-                </p>
-              </div>
-              <div className="flex flex-wrap items-center gap-2">
-                <button
-                  type="button"
-                  className="btn btn-ghost"
-                  disabled={aiBusy || !id || !aiKeywords.length}
-                  onClick={() => void onApplyMatchSuggestions()}
-                >
-                  Apply suggestions
-                </button>
-                {aiBusy ? (
-                  <span className="t-caption text-[var(--text-muted)]">
-                    Analyzing ATS fit…
-                  </span>
+            <div className="ats-panel">
+              <header className="ats-panel-hero">
+                <div className="ats-panel-hero-top">
+                  <div>
+                    <p className="ats-panel-kicker">ATS fit</p>
+                    <p className="ats-panel-hero-meta">
+                      {!jd.trim()
+                        ? "Paste a posting to score"
+                        : aiBusy && !hasOfficial
+                          ? `Scanning… ${coverageFound}/${Math.max(coverageTotal, 1)}`
+                          : coverageTotal > 0
+                            ? `${coverageFound}/${coverageTotal} skills · via ${
+                                keywordSource === "ai"
+                                  ? "AI"
+                                  : keywordSource === "local"
+                                    ? "patterns"
+                                    : "matcher"
+                              }`
+                            : hasOfficial && !isKeywordFallback
+                              ? "LLM score ready"
+                              : "Keyword coverage"}
+                    </p>
+                  </div>
+                  <div
+                    className={[
+                      "ats-panel-score",
+                      !jd.trim()
+                        ? "is-empty"
+                        : displayRate >= 70
+                          ? "is-good"
+                          : displayRate >= 45
+                            ? "is-ok"
+                            : "is-low",
+                    ].join(" ")}
+                  >
+                    <span className="ats-panel-score-n">
+                      {jd.trim() ? displayRate : "—"}
+                    </span>
+                    <span className="ats-panel-score-u">
+                      {jd.trim() ? "%" : ""}
+                    </span>
+                  </div>
+                </div>
+                {jd.trim() ? (
+                  <div className="ats-panel-meter" aria-hidden>
+                    <span style={{ width: `${Math.min(100, displayRate)}%` }} />
+                  </div>
                 ) : null}
-                {!aiBusy && jd.trim().length >= 40 ? (
+                <div className="ats-panel-actions">
                   <button
                     type="button"
-                    className="btn btn-ghost"
-                    disabled={!id}
+                    className="btn btn-primary ats-panel-action-primary"
+                    disabled={aiBusy || !id || jd.trim().length < 40}
                     onClick={() => {
                       lastAtsKeyRef.current = "";
                       void onAiMatch();
                     }}
                   >
-                    Re-check
+                    {aiBusy ? "Analyzing…" : "Re-check"}
                   </button>
-                ) : null}
-              </div>
-              <div className="field flex-1">
+                </div>
+              </header>
+
+              {isKeywordFallback && hasOfficial ? (
+                <div className="ats-panel-banner is-warn">
+                  AI score unavailable — keyword coverage only. Fix API key in
+                  Settings, then re-check.
+                </div>
+              ) : null}
+
+              {entryLevelNote ? (
+                <div className="ats-panel-banner is-info">
+                  {entryLevelNote}
+                  {softSkillsMissing.length
+                    ? ` Missing on resume: ${softSkillsMissing.join(", ")}.`
+                    : ""}
+                </div>
+              ) : null}
+
+              <section className="ats-panel-card">
+                <div className="ats-panel-card-head">
+                  <h3 className="ats-panel-card-title">Target job</h3>
+                  <span className="ats-panel-card-count">
+                    {jd.trim().length
+                      ? `${jd.trim().length.toLocaleString()} chars`
+                      : "Empty"}
+                  </span>
+                </div>
                 <textarea
-                  className="builder-resize-y min-h-[240px] w-full flex-1 font-mono text-[12px] leading-relaxed"
+                  className="ats-panel-jd"
                   value={jd}
                   onChange={(e) => setJd(e.target.value)}
                   placeholder="Paste the full job posting here…"
+                  rows={jd.trim().length > 80 ? 6 : 8}
                 />
-              </div>
-              {isKeywordFallback && hasOfficial ? (
-                <div
-                  className="rounded-[var(--radius-md)] border px-3 py-2 t-body-sm"
-                  style={{
-                    borderColor: "var(--border-warning, #f5d0a9)",
-                    background: "var(--warning-bg, #fff7ed)",
-                    color: "var(--warning, #c2410c)",
-                  }}
-                >
-                  AI analysis unavailable — showing keyword coverage only. Add or
-                  fix your API key in Settings, then re-check.
-                </div>
-              ) : null}
-              <div
-                className={[
-                  "match-card",
-                  !jd.trim()
-                    ? "is-empty"
-                    : displayRate >= 50
-                      ? "is-good"
-                      : displayRate >= 30
-                        ? "is-ok"
-                        : "is-low",
-                ].join(" ")}
-              >
-                <div className="flex items-baseline justify-between gap-2">
-                  <span className="match-card-label">
-                    {hasOfficial && !isKeywordFallback
-                      ? "ATS fit score"
-                      : "Keyword coverage"}
-                  </span>
-                  <span className="match-card-rate">
-                    {jd.trim() ? `${displayRate}%` : "—"}
-                  </span>
-                </div>
-                <p className="match-card-meta">
-                  {!jd.trim()
-                    ? "Paste a job posting to score fit"
-                    : aiBusy && !hasOfficial
-                      ? `Scanning skills… ${coverageFound}/${Math.max(coverageTotal, 1)} found`
-                      : coverageTotal > 0
-                        ? `Keyword coverage ${coverageFound}/${coverageTotal} skills`
-                        : "No skill keywords extracted yet"}
-                </p>
-                {jd.trim() ? (
-                  <div className="match-card-bar" aria-hidden>
-                    <span style={{ width: `${Math.min(100, displayRate)}%` }} />
-                  </div>
-                ) : null}
-              </div>
+              </section>
+
               {jd.trim() &&
               (skeletonMatched.length > 0 || skeletonMissing.length > 0) ? (
-                <div className="flex flex-col gap-2">
+                <section className="ats-panel-card">
+                  <div className="ats-panel-card-head">
+                    <h3 className="ats-panel-card-title">Skills coverage</h3>
+                  </div>
                   {skeletonMatched.length ? (
-                    <div>
-                      <p className="t-caption mb-2">
-                        Found on resume
-                        {aiBusy && !hasOfficial ? " (preview)" : ""}
-                      </p>
-                      <div className="flex flex-wrap gap-1.5">
+                    <div className="ats-panel-skill-block">
+                      <div className="ats-panel-skill-label is-ok">
+                        <span>Found</span>
+                        <span>{skeletonMatched.length}</span>
+                      </div>
+                      <div className="ats-panel-chips">
                         {skeletonMatched.slice(0, 24).map((k) => (
-                          <span
-                            key={`m-${k}`}
-                            className="rounded-[var(--radius-sm)] bg-[var(--success-bg)] px-2 py-0.5 text-[11px] text-[var(--success)]"
-                          >
+                          <span key={`m-${k}`} className="ats-chip is-ok">
                             {k}
                           </span>
                         ))}
@@ -1110,52 +1103,82 @@ export default function BuilderClient() {
                     </div>
                   ) : null}
                   {skeletonMissing.length ? (
-                    <div>
-                      <p className="t-caption mb-2">Skills gap</p>
-                      <div className="flex flex-wrap gap-1.5">
+                    <div className="ats-panel-skill-block">
+                      <div className="ats-panel-skill-label is-gap">
+                        <span>Gap</span>
+                        <span>{skeletonMissing.length}</span>
+                      </div>
+                      <div className="ats-panel-chips">
                         {skeletonMissing.slice(0, 24).map((k) => (
-                          <span
-                            key={`x-${k}`}
-                            className="rounded-[var(--radius-sm)] border border-[var(--border)] bg-white px-2 py-0.5 text-[11px] text-[var(--text-secondary)]"
-                          >
+                          <span key={`x-${k}`} className="ats-chip is-gap">
                             {k}
                           </span>
                         ))}
                       </div>
                     </div>
                   ) : null}
-                </div>
-              ) : null}
-              {aiCategories.length && !isKeywordFallback ? (
-                <div className="grid grid-cols-2 gap-2">
-                  {aiCategories.map((c) => (
-                    <div
-                      key={c.id}
-                      className="rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--surface-0)] px-3 py-2"
-                    >
-                      <p className="t-caption">{c.label}</p>
-                      <p className="t-body-sm mt-0.5 font-medium text-[var(--text-primary)]">
-                        {c.score}%
-                      </p>
-                    </div>
-                  ))}
-                </div>
-              ) : null}
-              {aiNotes && !isKeywordFallback ? (
-                <div className="rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--surface-0)] p-3">
-                  <p className="t-caption mb-1">AI notes</p>
-                  <p className="t-body-sm whitespace-pre-wrap text-[var(--text-secondary)]">
-                    {aiNotes}
-                  </p>
-                </div>
+                </section>
               ) : null}
 
-              <div className="ats-coach">
-                <div className="ats-coach-head">
-                  <span className="ats-coach-title">ATS coach</span>
-                  <span className="ats-coach-hint" title="Edits apply to the editor — Save to keep">
-                    Save to keep
-                  </span>
+              {aiCategories.length && !isKeywordFallback ? (
+                <section className="ats-panel-card">
+                  <div className="ats-panel-card-head">
+                    <h3 className="ats-panel-card-title">Breakdown</h3>
+                  </div>
+                  <ul className="ats-panel-bars">
+                    {aiCategories.map((c) => (
+                      <li key={c.id} className="ats-panel-bar-row">
+                        <div className="ats-panel-bar-meta">
+                          <span>{c.label}</span>
+                          <span className="ats-panel-bar-n">{c.score}%</span>
+                        </div>
+                        <div className="ats-panel-bar-track" aria-hidden>
+                          <span
+                            className={
+                              c.score >= 70
+                                ? "is-good"
+                                : c.score >= 45
+                                  ? "is-ok"
+                                  : "is-low"
+                            }
+                            style={{ width: `${Math.min(100, c.score)}%` }}
+                          />
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+              ) : null}
+
+              {aiNotes && !isKeywordFallback ? (
+                <section className="ats-panel-card">
+                  <div className="ats-panel-card-head">
+                    <h3 className="ats-panel-card-title">AI notes</h3>
+                  </div>
+                  <ul className="ats-panel-notes">
+                    {aiNotes
+                      .split(/\n+/)
+                      .map((line) => line.replace(/^[-•*]\s*/, "").trim())
+                      .filter(Boolean)
+                      .map((line, i) => (
+                        <li key={`note-${i}`}>{line}</li>
+                      ))}
+                  </ul>
+                </section>
+              ) : null}
+
+              <section
+                className={[
+                  "ats-panel-card ats-coach",
+                  atsChatBusy ? "is-busy" : "",
+                ]
+                  .filter(Boolean)
+                  .join(" ")}
+                aria-busy={atsChatBusy}
+              >
+                <div className="ats-panel-card-head">
+                  <h3 className="ats-panel-card-title">ATS coach</h3>
+                  <span className="ats-coach-hint">Save to keep</span>
                 </div>
                 <div className="ats-coach-actions">
                   <button
@@ -1200,7 +1223,12 @@ export default function BuilderClient() {
                       </div>
                     ))}
                   </div>
-                ) : null}
+                ) : (
+                  <p className="ats-coach-empty">
+                    Ask the coach to raise score or close gaps — edits land in
+                    the editor.
+                  </p>
+                )}
                 <div className="ats-coach-compose">
                   <input
                     type="text"
@@ -1232,23 +1260,13 @@ export default function BuilderClient() {
                     {atsChatBusy ? "…" : "Send"}
                   </button>
                 </div>
-              </div>
-
-              {aiKeywords.length ? (
-                <div>
-                  <p className="t-caption mb-2">JD skill keywords</p>
-                  <div className="flex flex-wrap gap-1.5">
-                    {aiKeywords.slice(0, 24).map((h) => (
-                      <span
-                        key={h.k}
-                        className="rounded-[var(--radius-sm)] border border-[var(--accent)]/40 bg-[var(--accent-soft)] px-2 py-0.5 text-[11px]"
-                      >
-                        {h.k}
-                      </span>
-                    ))}
+                {atsChatBusy ? (
+                  <div className="ats-coach-overlay" role="status">
+                    <span className="ats-coach-spinner" aria-hidden />
+                    <span className="ats-coach-overlay-label">Coach is working…</span>
                   </div>
-                </div>
-              ) : null}
+                ) : null}
+              </section>
             </div>
           ) : null}
 
@@ -1462,7 +1480,7 @@ export default function BuilderClient() {
                   <div className="border-b border-[var(--border)] px-4 py-2.5">
                     <h3 className="t-h3">Target job</h3>
                   </div>
-                  <pre className="max-h-[70vh] overflow-auto whitespace-pre-wrap p-4 font-mono text-[12px] leading-relaxed text-[var(--text-secondary)]">
+                  <pre className="max-h-[70vh] overflow-auto whitespace-pre-wrap p-4 font-mono text-[12px] leading-relaxed text-[var(--text-primary)]">
                     {jd.trim() ||
                       "Paste a job posting in the left panel to analyze fit."}
                   </pre>

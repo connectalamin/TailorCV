@@ -29,6 +29,8 @@ const STOP = new Set(
   clients client product products platform platforms real form forms comment comments
   breaks break curve curves academy graduate graduates fresh junior senior mid entry
   intern internship contract fulltime parttime week weeks month months monthly hour hours
+  cse non-cse noncse fresher freshers undergrad undergraduate bachelor bachelors
+  degree degrees eligibility eligible
   ensure ensuring provide providing support supporting develop developing developed
   create creating created design designing designed implement implementing implemented
   maintain maintaining maintained collaborate collaborating collaboration communicate
@@ -60,7 +62,7 @@ const SOFT_COMPOUND = new Set(
 );
 
 const PHRASE_RE =
-  /\b(?:next\.?\s*js|node\.?\s*js|react\.?\s*js|vue\.?\s*js|nuxt\.?\s*js|type\s*script|java\s*script|c\s*\+\+|c\s*#|objective\s*c|machine\s+learning|deep\s+learning|data\s+science|data\s+structures?|rest\s+apis?|graphql|ci\s*\/?\s*cd|unit\s+tests?|end\s*to\s*end|full[\s-]?stack|front[\s-]?end|back[\s-]?end|dev\s*ops|react\s+native|tailwind\s+css|material\s+ui|redux\s+toolkit|amazon\s+web\s+services|google\s+cloud|vs\s*code|object\s+oriented|test\s+driven|domain\s+driven|large\s+language\s+models?|computer\s+vision|web\s+sockets?|service\s+workers?|headless\s+cms)\b/gi;
+  /\b(?:next\.?\s*js|node\.?\s*js|react\.?\s*js|vue\.?\s*js|nuxt\.?\s*js|type\s*script|java\s*script|c\s*\+\+|c\s*#|objective\s*c|machine\s+learning|deep\s+learning|data\s+science|data\s+structures?|rest\s+apis?|graphql|ci\s*\/?\s*cd|unit\s+tests?|end\s*to\s*end|full[\s-]?stack|front[\s-]?end|back[\s-]?end|dev\s*ops|react\s+native|tailwind\s+css|material\s+ui|redux\s+toolkit|amazon\s+web\s+services|google\s+cloud|vs\s*code|object\s+oriented|test\s+driven|domain\s+driven|large\s+language\s+models?|computer\s+vision|web\s+sockets?|service\s+workers?|headless\s+cms|search\s+engine\s+optimization|customer\s+relationship\s+management|google\s+analytics|google\s+ads|project\s+management|product\s+management|digital\s+marketing|content\s+marketing|growth\s+marketing|financial\s+modeling|profit\s+and\s+loss|p\s*&\s*l|problem[\s-]+solving|communication\s+skills|analytical\s+skills)\b/gi;
 
 const TECH = new Set(
   `react angular vue svelte next nuxt remix django flask fastapi express nestjs
@@ -73,10 +75,20 @@ const TECH = new Set(
   selenium webpack vite babel eslint prettier git github gitlab bitbucket jira
   confluence notion slack npm pnpm yarn pytorch tensorflow sklearn pandas numpy
   spark hadoop airflow dbt snowflake databricks tableau powerbi excel nginx apache
-  cms headless headlesscms edtech fintech healthtech microservices serverless
-  saas paas iaas agile scrum kanban tdd bdd oop solid dry rest soap json xml
-  yaml toml markdown latex photoshop illustrator blender unity unreal android
-  ios flutter dart swiftui compose`.split(/\s+/),
+  cms headless headlesscms edtech fintech healthtech martech adtech microservices
+  serverless saas paas iaas agile scrum kanban tdd bdd oop solid dry rest soap
+  json xml yaml toml markdown latex photoshop illustrator blender unity unreal
+  android ios flutter dart swiftui compose
+  seo sem ppc cpc cpm ctr cvr roi roas kpi kpis okr okrs crm erp hris ats
+  gaap ifrs pnl ebitda arr mrr ltv cac nps csat b2b b2c b2g hubspot salesforce
+  marketo mailchimp klaviyo braze segment mixpanel amplitude hotjar optimizely
+  ga4 gtm ahrefs semrush moz googleanalytics googleads metaads linkedinads
+  quickbooks xero netsuite sap workday pmp prince2 sixsigma lean itil rpa
+  project-management product-management digital-marketing content-marketing
+  growth-marketing performance-marketing email-marketing paid-search paid-social
+  marketing-automation financial-modeling mcq mcqs problem-solving problemsolving
+  communication-skills analytical-skills typeorm sqlalchemy assessment assessments
+  quiz quizzes lms scorm moodle`.split(/\s+/),
 );
 
 function normPhrase(p: string): string {
@@ -89,6 +101,20 @@ function normPhrase(p: string): string {
   s = s.replace(/back end/g, "backend").replace(/back-end/g, "backend");
   s = s.replace(/full stack/g, "fullstack").replace(/full-stack/g, "fullstack");
   s = s.replace(/dev ops/g, "devops").replace(/ci \/ cd/g, "ci/cd");
+  s = s.replace(/search engine optimization/g, "seo");
+  s = s.replace(/customer relationship management/g, "crm");
+  s = s.replace(/google analytics/g, "googleanalytics");
+  s = s.replace(/google ads/g, "googleads");
+  s = s.replace(/project management/g, "project-management");
+  s = s.replace(/product management/g, "product-management");
+  s = s.replace(/digital marketing/g, "digital-marketing");
+  s = s.replace(/content marketing/g, "content-marketing");
+  s = s.replace(/growth marketing/g, "growth-marketing");
+  s = s.replace(/financial modeling/g, "financial-modeling");
+  s = s.replace(/profit and loss/g, "pnl").replace(/p & l/g, "pnl").replace(/p&l/g, "pnl");
+  s = s.replace(/problem solving/g, "problem-solving");
+  s = s.replace(/communication skills/g, "communication-skills");
+  s = s.replace(/analytical skills/g, "analytical-skills");
   return s.trim();
 }
 
@@ -98,17 +124,13 @@ function looksTechnical(tok: string): boolean {
   const compact = t.replace(/[.\s\-/]/g, "");
   if (TECH.has(t) || TECH.has(compact)) return true;
   if (/[.+#/]/.test(t)) return true;
-  if (/(js|sql|db|api|css|orm|cli|sdk|ml|ai|ui|ux)$/.test(t) && t.length >= 3)
+  // Avoid "form" matching "...orm"
+  if (/(js|sql|db|api|css|cli|sdk|ml|ai|ui|ux)$/.test(t) && t.length >= 3)
     return true;
+  if (t === "orm" || (t.endsWith("orm") && t.length >= 5)) return true;
   if (t.includes("-") && !SOFT_COMPOUND.has(t)) {
     const [left, right] = t.split("-", 2);
-    if (TECH.has(left) || TECH.has(right)) return true;
-    if (
-      /^(non|anti|pre|post|multi)-[a-z0-9]{2,}$/.test(t) &&
-      t.length <= 16
-    ) {
-      return true;
-    }
+    if (TECH.has(left) || TECH.has(right) || TECH.has(compact)) return true;
   }
   if (t.length >= 2 && /\d$/.test(t) && TECH.has(t.slice(0, -1))) return true;
   return false;

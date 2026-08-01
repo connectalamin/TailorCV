@@ -40,6 +40,43 @@ function employmentLabel(value?: string) {
   return hit?.label || value;
 }
 
+/** Normalize stored date text to YYYY-MM-DD for `<input type="date">`. */
+function toDateInputValue(raw?: string | null): string {
+  if (!raw) return "";
+  const s = raw.trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  const m = s.match(/^(\d{4})[\/\-.](\d{1,2})[\/\-.](\d{1,2})$/);
+  if (m) {
+    const y = m[1];
+    const mo = m[2].padStart(2, "0");
+    const d = m[3].padStart(2, "0");
+    return `${y}-${mo}-${d}`;
+  }
+  const t = Date.parse(s);
+  if (Number.isNaN(t)) return "";
+  const dt = new Date(t);
+  if (Number.isNaN(dt.getTime())) return "";
+  const y = dt.getFullYear();
+  const mo = String(dt.getMonth() + 1).padStart(2, "0");
+  const d = String(dt.getDate()).padStart(2, "0");
+  return `${y}-${mo}-${d}`;
+}
+
+/** Display YYYY-MM-DD as a short locale date; pass through other text. */
+function formatDateLabel(raw?: string | null): string | null {
+  if (!raw) return null;
+  const iso = toDateInputValue(raw);
+  if (iso && /^\d{4}-\d{2}-\d{2}$/.test(iso)) {
+    const [y, mo, d] = iso.split("-").map(Number);
+    return new Date(y, mo - 1, d).toLocaleDateString(undefined, {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+    });
+  }
+  return raw.trim() || null;
+}
+
 function matchCls(m: number) {
   if (m >= 88) return "hi";
   if (m >= 80) return "mid";
@@ -127,8 +164,8 @@ export default function TrackerPage() {
     setDraftLocation(app.location ?? "");
     setDraftEmploymentType(app.employmentType ?? "");
     setDraftSalary(app.salary ?? "");
-    setDraftDeadline(app.deadline ?? "");
-    setDraftStartDate(app.startDate ?? "");
+    setDraftDeadline(toDateInputValue(app.deadline));
+    setDraftStartDate(toDateInputValue(app.startDate));
     setDraftStatus(app.status);
     setDraftNotes(app.notes ?? "");
     setOpen(false);
@@ -201,14 +238,18 @@ export default function TrackerPage() {
 
   async function onConfirmDelete() {
     if (!selected) return;
+    const id = selected.id;
     const label = selected.company;
     setDeleting(true);
     try {
-      await deleteApplication(selected.id);
+      await deleteApplication(id);
       setConfirmDelete(false);
       setSelectedId(null);
+      setApps((prev) => prev.filter((a) => a.id !== id));
       await load();
       toast.success(`${label} removed`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not delete application");
     } finally {
       setDeleting(false);
     }
@@ -337,8 +378,14 @@ export default function TrackerPage() {
                     {a.deadline || a.startDate ? (
                       <p className="kc-sub">
                         {[
-                          a.deadline ? `Due ${a.deadline}` : null,
-                          a.startDate ? `Start ${a.startDate}` : null,
+                          (() => {
+                            const d = formatDateLabel(a.deadline);
+                            return d ? `Due ${d}` : null;
+                          })(),
+                          (() => {
+                            const d = formatDateLabel(a.startDate);
+                            return d ? `Start ${d}` : null;
+                          })(),
                         ]
                           .filter(Boolean)
                           .join(" · ")}
@@ -400,14 +447,14 @@ export default function TrackerPage() {
             onChange={(e) => setSalary(e.target.value)}
           />
           <input
-            placeholder="Deadline"
-            autoComplete="off"
+            type="date"
+            aria-label="Deadline"
             value={deadline}
             onChange={(e) => setDeadline(e.target.value)}
           />
           <input
-            placeholder="Start date"
-            autoComplete="off"
+            type="date"
+            aria-label="Start date"
             value={startDate}
             onChange={(e) => setStartDate(e.target.value)}
           />
@@ -438,9 +485,18 @@ export default function TrackerPage() {
             type="button"
             className="app-drawer-backdrop"
             aria-label="Close application details"
-            onClick={() => setSelectedId(null)}
+            disabled={confirmDelete || deleting}
+            onClick={() => {
+              if (!confirmDelete && !deleting) setSelectedId(null);
+            }}
           />
-          <aside className="app-drawer" role="dialog" aria-modal="true" aria-labelledby="app-drawer-title">
+          <aside
+            className={`app-drawer${confirmDelete ? " is-inert" : ""}`}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="app-drawer-title"
+            aria-hidden={confirmDelete || undefined}
+          >
             <header className="app-drawer-head">
               <div>
                 <p className="t-caption text-[var(--accent)]">Application</p>
@@ -451,6 +507,7 @@ export default function TrackerPage() {
               <button
                 type="button"
                 className="btn btn-ghost"
+                disabled={confirmDelete || deleting}
                 onClick={() => setSelectedId(null)}
               >
                 Close
@@ -520,7 +577,7 @@ export default function TrackerPage() {
                 <label htmlFor="app-deadline">Deadline</label>
                 <input
                   id="app-deadline"
-                  placeholder="Application deadline"
+                  type="date"
                   value={draftDeadline}
                   onChange={(e) => setDraftDeadline(e.target.value)}
                 />
@@ -529,7 +586,7 @@ export default function TrackerPage() {
                 <label htmlFor="app-start-date">Start date</label>
                 <input
                   id="app-start-date"
-                  placeholder="ASAP, Q4, date…"
+                  type="date"
                   value={draftStartDate}
                   onChange={(e) => setDraftStartDate(e.target.value)}
                 />
@@ -589,6 +646,7 @@ export default function TrackerPage() {
                 <button
                   type="button"
                   className="btn btn-danger"
+                  disabled={confirmDelete || deleting}
                   onClick={() => setConfirmDelete(true)}
                 >
                   Delete
@@ -596,7 +654,7 @@ export default function TrackerPage() {
                 <button
                   type="button"
                   className="btn btn-primary"
-                  disabled={saving}
+                  disabled={saving || confirmDelete || deleting}
                   onClick={() => void onSaveDetail()}
                 >
                   {saving ? "Saving…" : "Save"}

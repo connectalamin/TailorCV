@@ -353,7 +353,7 @@ export default function DashboardPage() {
               {typeof masterAts === "number" ? (
                 <span className={atsPillClass(masterAts)}>ATS · {masterAts}%</span>
               ) : (
-                <span className="pill">Master</span>
+                <span className="dash-master-badge">Master resume</span>
               )}
             </div>
           ) : null}
@@ -362,7 +362,7 @@ export default function DashboardPage() {
             className="btn btn-secondary"
             onClick={() => setUploadOpen(true)}
           >
-            {hasMaster ? "Replace master" : "Upload master"}
+            {hasMaster ? "Replace master resume" : "Upload master resume"}
           </button>
           <button type="button" className="btn btn-primary" onClick={openTailor}>
             Tailor from JD
@@ -382,7 +382,7 @@ export default function DashboardPage() {
           {
             label: "Resumes tailored",
             value: loading ? "—" : String(tailored.length),
-            sub: hasMaster ? "Master ready" : "No master yet",
+            sub: hasMaster ? "Master resume ready" : "No master resume yet",
             bar: tailored.length ? Math.min(100, tailored.length * 18) : 0,
             color: "var(--accent)",
           },
@@ -627,7 +627,7 @@ export default function DashboardPage() {
                 </span>
                 <span className="min-w-0 flex-1">
                   <span className="t-body block font-medium text-[var(--text-primary)]">
-                    Open master
+                    Open master resume
                   </span>
                   <span className="t-body-sm truncate text-[var(--text-secondary)]">
                     {master.sourceFile || "Master resume"} · {timeAgo(master.updatedAt)}
@@ -793,7 +793,7 @@ export default function DashboardPage() {
           >
             <div className="flex items-center justify-between border-b border-[var(--border)] px-6 py-4">
               <h2 className="t-h2">
-                {hasMaster ? "Replace master resume" : "Upload resume"}
+                {hasMaster ? "Replace master resume" : "Upload master resume"}
               </h2>
               <button
                 type="button"
