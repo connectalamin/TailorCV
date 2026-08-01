@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import io
+import re
 import shutil
 import subprocess
 import tempfile
@@ -14,10 +16,42 @@ class CompileResult:
     pdf: Optional[bytes] = None
     error: Optional[str] = None
     log: Optional[str] = None
+    pages: int = 0
+
+
+_PAGES_IN_LOG = re.compile(
+    r"Output written on .+?\((\d+)\s+pages?",
+    re.IGNORECASE,
+)
 
 
 def latex_available() -> bool:
     return shutil.which("pdflatex") is not None
+
+
+def pdf_page_count(pdf: bytes) -> int:
+    """Return page count for a PDF blob (0 if unreadable)."""
+    if not pdf or len(pdf) < 100:
+        return 0
+    try:
+        import pdfplumber
+
+        with pdfplumber.open(io.BytesIO(pdf)) as doc:
+            return len(doc.pages)
+    except Exception:
+        pass
+    # Fallback: count leaf Page objects (exclude /Pages)
+    return len(re.findall(rb"/Type\s*/Page(?!\s*s)", pdf))
+
+
+def _pages_from_log(log: str) -> int:
+    m = _PAGES_IN_LOG.search(log or "")
+    if not m:
+        return 0
+    try:
+        return int(m.group(1))
+    except ValueError:
+        return 0
 
 
 def compile_pdf(tex_source: str) -> CompileResult:
@@ -63,4 +97,11 @@ def compile_pdf(tex_source: str) -> CompileResult:
         pdf = pdf_path.read_bytes()
         if len(pdf) < 100 or not pdf[:5] == b"%PDF-":
             return CompileResult(ok=False, error="pdflatex produced an invalid PDF")
-        return CompileResult(ok=True, pdf=pdf)
+
+        log = ""
+        try:
+            log = log_path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            pass
+        pages = _pages_from_log(log) or pdf_page_count(pdf)
+        return CompileResult(ok=True, pdf=pdf, log=log or None, pages=pages)

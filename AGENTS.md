@@ -55,7 +55,7 @@ Browser calls `NEXT_PUBLIC_API_URL` (default `http://localhost:8000`).
 
 ## Design system
 
-Tokens: `apps/frontend/app/ds.css` — **Estilo Deep Learning High-Tech** (dark, NVIDIA green `#76B900`, Roboto Mono). Resume sheet stays monochrome ATS.
+Tokens: `apps/frontend/app/ds.css` — **Genesis** (light `#FAFAFA`, indigo `#6366F1`, General Sans + DM Sans). Resume sheet stays monochrome ATS.
 
 ## Env
 
@@ -63,7 +63,7 @@ See `.env.example`. Important: `NEXT_PUBLIC_USE_MOCK=false` (default) · `SEED_D
 
 ## Default resume format
 
-**LaTeX ATS** (`template: "latex"`): letter, ~0.75in, 10.5pt, single column, black `\titlerule`. Order: Objective → Skills → Achievements → Education → Experience → Projects → Certs → Activities.
+**LaTeX ATS** (`template: "latex"`): A4, ~0.6in, 10.5pt, single column, black `\titlerule`. Order: Objective → Skills → Achievements → Education → Experience → Projects → Certs → Activities. If PDF still exceeds 1 page after layout, improve shortens content via LLM.
 
 Skills must be categorized lines (`Languages: …`, `Frontend: …`), not one tech per bullet. See `.cursor/skills/tailorcv-ats-resume/`.
 

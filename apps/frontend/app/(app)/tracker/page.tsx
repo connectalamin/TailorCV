@@ -20,11 +20,25 @@ import {
 import type { Application, ApplicationStatus } from "@/lib/types/resume";
 
 const KCOLS: { id: ApplicationStatus; name: string; c: string }[] = [
-  { id: "wish", name: "Wishlist", c: "#8A8A8A" },
-  { id: "applied", name: "Applied", c: "#00BFFF" },
-  { id: "interview", name: "Interview", c: "#E8A317" },
-  { id: "offer", name: "Offer", c: "#76B900" },
+  { id: "wish", name: "Wishlist", c: "#9C9C9C" },
+  { id: "applied", name: "Applied", c: "#6366F1" },
+  { id: "interview", name: "Interview", c: "#F59E0B" },
+  { id: "offer", name: "Offer", c: "#10B981" },
 ];
+
+const EMPLOYMENT_TYPES = [
+  { value: "", label: "—" },
+  { value: "full-time", label: "Full-time" },
+  { value: "part-time", label: "Part-time" },
+  { value: "contract", label: "Contract" },
+  { value: "internship", label: "Internship" },
+] as const;
+
+function employmentLabel(value?: string) {
+  if (!value) return null;
+  const hit = EMPLOYMENT_TYPES.find((t) => t.value === value);
+  return hit?.label || value;
+}
 
 function matchCls(m: number) {
   if (m >= 88) return "hi";
@@ -32,20 +46,26 @@ function matchCls(m: number) {
   return "lo";
 }
 
-function templateTagCls(_template?: string) {
-  return "ktag-latex";
-}
-
 export default function TrackerPage() {
   const [apps, setApps] = useState<Application[]>([]);
   const [open, setOpen] = useState(false);
   const [company, setCompany] = useState("");
   const [role, setRole] = useState("");
+  const [location, setLocation] = useState("");
+  const [employmentType, setEmploymentType] = useState("");
+  const [salary, setSalary] = useState("");
+  const [deadline, setDeadline] = useState("");
+  const [startDate, setStartDate] = useState("");
   const [col, setCol] = useState<ApplicationStatus>("applied");
   const [dragOver, setDragOver] = useState<ApplicationStatus | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [draftCompany, setDraftCompany] = useState("");
   const [draftRole, setDraftRole] = useState("");
+  const [draftLocation, setDraftLocation] = useState("");
+  const [draftEmploymentType, setDraftEmploymentType] = useState("");
+  const [draftSalary, setDraftSalary] = useState("");
+  const [draftDeadline, setDraftDeadline] = useState("");
+  const [draftStartDate, setDraftStartDate] = useState("");
   const [draftStatus, setDraftStatus] = useState<ApplicationStatus>("wish");
   const [draftNotes, setDraftNotes] = useState("");
   const [saving, setSaving] = useState(false);
@@ -104,6 +124,11 @@ export default function TrackerPage() {
     setSelectedId(app.id);
     setDraftCompany(app.company);
     setDraftRole(app.role);
+    setDraftLocation(app.location ?? "");
+    setDraftEmploymentType(app.employmentType ?? "");
+    setDraftSalary(app.salary ?? "");
+    setDraftDeadline(app.deadline ?? "");
+    setDraftStartDate(app.startDate ?? "");
     setDraftStatus(app.status);
     setDraftNotes(app.notes ?? "");
     setOpen(false);
@@ -112,9 +137,23 @@ export default function TrackerPage() {
   async function onCreate() {
     const c = company.trim() || "Untitled Co";
     const r = role.trim() || "Frontend Engineer";
-    await createApplication({ company: c, role: r, status: col });
+    await createApplication({
+      company: c,
+      role: r,
+      location: location.trim() || undefined,
+      employmentType: employmentType || undefined,
+      salary: salary.trim() || undefined,
+      deadline: deadline.trim() || undefined,
+      startDate: startDate.trim() || undefined,
+      status: col,
+    });
     setCompany("");
     setRole("");
+    setLocation("");
+    setEmploymentType("");
+    setSalary("");
+    setDeadline("");
+    setStartDate("");
     setOpen(false);
     await load();
     toast.success(`${c} added to ${KCOLS.find((x) => x.id === col)?.name}`);
@@ -145,6 +184,11 @@ export default function TrackerPage() {
       await updateApplication(selected.id, {
         company: draftCompany.trim() || selected.company,
         role: draftRole.trim() || selected.role,
+        location: draftLocation.trim() || undefined,
+        employmentType: draftEmploymentType || undefined,
+        salary: draftSalary.trim() || undefined,
+        deadline: draftDeadline.trim() || undefined,
+        startDate: draftStartDate.trim() || undefined,
         status: draftStatus,
         notes: draftNotes,
       });
@@ -271,18 +315,42 @@ export default function TrackerPage() {
                   >
                     <div className="kc-top">
                       <b>{a.company}</b>
-                      <span className="kc-grip" aria-hidden>
-                        ⋮⋮
+                      <span className="kc-grip" aria-hidden title="Drag">
+                        <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+                          <circle cx="5" cy="4" r="1.25" />
+                          <circle cx="11" cy="4" r="1.25" />
+                          <circle cx="5" cy="8" r="1.25" />
+                          <circle cx="11" cy="8" r="1.25" />
+                          <circle cx="5" cy="12" r="1.25" />
+                          <circle cx="11" cy="12" r="1.25" />
+                        </svg>
                       </span>
                     </div>
                     <p>{a.role}</p>
+                    {a.location || a.employmentType ? (
+                      <p className="kc-sub">
+                        {[a.location, employmentLabel(a.employmentType)]
+                          .filter(Boolean)
+                          .join(" · ")}
+                      </p>
+                    ) : null}
+                    {a.deadline || a.startDate ? (
+                      <p className="kc-sub">
+                        {[
+                          a.deadline ? `Due ${a.deadline}` : null,
+                          a.startDate ? `Start ${a.startDate}` : null,
+                        ]
+                          .filter(Boolean)
+                          .join(" · ")}
+                      </p>
+                    ) : null}
                     <div className="kc-meta">
                       <span className={`match ${matchCls(a.match ?? 0)}`}>
                         {a.match ?? 0}%
                       </span>
-                      <span className={`ktag ${templateTagCls(a.template)}`}>
-                        {a.template || "latex"}
-                      </span>
+                      {a.salary ? (
+                        <span className="ktag ktag-salary">{a.salary}</span>
+                      ) : null}
                       <span className="kdate">{a.dateLabel || "—"}</span>
                     </div>
                   </article>
@@ -307,6 +375,41 @@ export default function TrackerPage() {
             autoComplete="off"
             value={role}
             onChange={(e) => setRole(e.target.value)}
+          />
+          <input
+            placeholder="Location"
+            autoComplete="off"
+            value={location}
+            onChange={(e) => setLocation(e.target.value)}
+          />
+          <select
+            value={employmentType}
+            onChange={(e) => setEmploymentType(e.target.value)}
+            aria-label="Employment type"
+          >
+            {EMPLOYMENT_TYPES.map((t) => (
+              <option key={t.value || "none"} value={t.value}>
+                {t.value ? t.label : "Type"}
+              </option>
+            ))}
+          </select>
+          <input
+            placeholder="Salary"
+            autoComplete="off"
+            value={salary}
+            onChange={(e) => setSalary(e.target.value)}
+          />
+          <input
+            placeholder="Deadline"
+            autoComplete="off"
+            value={deadline}
+            onChange={(e) => setDeadline(e.target.value)}
+          />
+          <input
+            placeholder="Start date"
+            autoComplete="off"
+            value={startDate}
+            onChange={(e) => setStartDate(e.target.value)}
           />
           <select
             value={col}
@@ -359,9 +462,9 @@ export default function TrackerPage() {
                 <span className={`match ${matchCls(selected.match ?? 0)}`}>
                   {selected.match ?? 0}% match
                 </span>
-                <span className={`ktag ${templateTagCls(selected.template)}`}>
-                  {selected.template || "latex"}
-                </span>
+                {selected.salary ? (
+                  <span className="ktag ktag-salary">{selected.salary}</span>
+                ) : null}
                 <span className="kdate">{selected.dateLabel || "—"}</span>
               </div>
 
@@ -379,6 +482,56 @@ export default function TrackerPage() {
                   id="app-role"
                   value={draftRole}
                   onChange={(e) => setDraftRole(e.target.value)}
+                />
+              </div>
+              <div className="field">
+                <label htmlFor="app-location">Location</label>
+                <input
+                  id="app-location"
+                  placeholder="Remote, city, hybrid…"
+                  value={draftLocation}
+                  onChange={(e) => setDraftLocation(e.target.value)}
+                />
+              </div>
+              <div className="field">
+                <label htmlFor="app-employment-type">Employment type</label>
+                <select
+                  id="app-employment-type"
+                  value={draftEmploymentType}
+                  onChange={(e) => setDraftEmploymentType(e.target.value)}
+                >
+                  {EMPLOYMENT_TYPES.map((t) => (
+                    <option key={t.value || "none"} value={t.value}>
+                      {t.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="field">
+                <label htmlFor="app-salary">Salary</label>
+                <input
+                  id="app-salary"
+                  placeholder="$120k–$150k, €70k…"
+                  value={draftSalary}
+                  onChange={(e) => setDraftSalary(e.target.value)}
+                />
+              </div>
+              <div className="field">
+                <label htmlFor="app-deadline">Deadline</label>
+                <input
+                  id="app-deadline"
+                  placeholder="Application deadline"
+                  value={draftDeadline}
+                  onChange={(e) => setDraftDeadline(e.target.value)}
+                />
+              </div>
+              <div className="field">
+                <label htmlFor="app-start-date">Start date</label>
+                <input
+                  id="app-start-date"
+                  placeholder="ASAP, Q4, date…"
+                  value={draftStartDate}
+                  onChange={(e) => setDraftStartDate(e.target.value)}
                 />
               </div>
               <div className="field">

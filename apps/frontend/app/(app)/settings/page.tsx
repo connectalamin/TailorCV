@@ -6,19 +6,61 @@ import { ConfirmModal } from "@/components/ui/confirm-modal";
 import {
   deleteLlmEntry,
   fetchLlmConfig,
+  fetchLlmStats,
+  resetLlmStats,
   testLlmConnection,
   updateLlmConfig,
   PROVIDER_INFO,
   providerList,
 } from "@/lib/api";
-import type { LLMConfig, LLMEntry, LLMMode, LLMProvider } from "@/lib/types/resume";
+import type {
+  LLMConfig,
+  LLMEntry,
+  LLMMode,
+  LLMProvider,
+  LlmStats,
+} from "@/lib/types/resume";
 
-type Section = "llm" | "danger";
+type Section = "llm" | "stats" | "danger";
 
 const SECTIONS: { id: Section; label: string }[] = [
   { id: "llm", label: "API keys" },
+  { id: "stats", label: "AI usage" },
   { id: "danger", label: "Danger zone" },
 ];
+
+const OP_LABELS: Record<string, string> = {
+  parse: "Resume parse",
+  improve: "Tailor / improve",
+  rewrite: "Section rewrite",
+  keywords: "Keyword extract",
+  job_meta: "Job metadata",
+  ats: "ATS match",
+  aux: "Cover / outreach",
+  content_check: "Content check",
+  content_fix: "Content fix",
+  test: "Connection test",
+  other: "Other",
+};
+
+function formatTokens(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 10_000) return `${(n / 1000).toFixed(1)}k`;
+  if (n >= 1000) return `${(n / 1000).toFixed(2)}k`;
+  return String(n);
+}
+
+function formatWhen(iso: string | null | undefined): string {
+  if (!iso) return "—";
+  try {
+    return new Date(iso).toLocaleString(undefined, {
+      dateStyle: "medium",
+      timeStyle: "short",
+    });
+  } catch {
+    return iso;
+  }
+}
 
 function defaultBase(provider: LLMProvider): string {
   if (provider === "ollama") return "http://host.docker.internal:11434";
@@ -51,6 +93,9 @@ export default function SettingsPage() {
   const [dirty, setDirty] = useState(false);
   const [clearConfirmOpen, setClearConfirmOpen] = useState(false);
   const [deleteId, setDeleteId] = useState<string | null>(null);
+  const [stats, setStats] = useState<LlmStats | null>(null);
+  const [statsBusy, setStatsBusy] = useState(false);
+  const [resetStatsOpen, setResetStatsOpen] = useState(false);
 
   function applyConfig(c: LLMConfig) {
     setMode(c.mode || "single");
@@ -82,6 +127,15 @@ export default function SettingsPage() {
   useEffect(() => {
     void fetchLlmConfig().then(applyConfig);
   }, []);
+
+  useEffect(() => {
+    if (section !== "stats") return;
+    setStatsBusy(true);
+    void fetchLlmStats()
+      .then(setStats)
+      .catch(() => toast.error("Could not load AI usage"))
+      .finally(() => setStatsBusy(false));
+  }, [section]);
 
   function patchEntry(id: string, patch: Partial<EntryDraft>) {
     setEntries((list) => list.map((e) => (e.id === id ? { ...e, ...patch } : e)));
@@ -220,6 +274,27 @@ export default function SettingsPage() {
     toast.message("Local data cleared — refresh to see empty state");
   }
 
+  async function onResetStats() {
+    setStatsBusy(true);
+    try {
+      const next = await resetLlmStats();
+      setStats(next);
+      toast.success("Usage counters reset");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Reset failed");
+    } finally {
+      setStatsBusy(false);
+      setResetStatsOpen(false);
+    }
+  }
+
+  const opRows = stats
+    ? Object.entries(stats.byOperation).sort((a, b) => b[1].calls - a[1].calls)
+    : [];
+  const provRows = stats
+    ? Object.entries(stats.byProvider).sort((a, b) => b[1].calls - a[1].calls)
+    : [];
+
   return (
     <div className="page">
       <div className="settings-layout">
@@ -297,6 +372,11 @@ export default function SettingsPage() {
                               type="button"
                               className="btn btn-ghost"
                               disabled={busy || idx === 0}
+                              title={
+                                idx === 0
+                                  ? "Already primary — try order starts here"
+                                  : "Move higher in try order (closer to primary)"
+                              }
                               onClick={() => moveEntry(entry.id, -1)}
                             >
                               Up
@@ -305,6 +385,11 @@ export default function SettingsPage() {
                               type="button"
                               className="btn btn-ghost"
                               disabled={busy || idx === entries.length - 1}
+                              title={
+                                idx === entries.length - 1
+                                  ? "Already last in try order"
+                                  : "Move lower in try order (used later as fallback)"
+                              }
                               onClick={() => moveEntry(entry.id, 1)}
                             >
                               Down
@@ -315,6 +400,7 @@ export default function SettingsPage() {
                           type="button"
                           className="btn btn-ghost"
                           disabled={busy}
+                          title="Send a quick request to verify this provider works"
                           onClick={() => void onTest(entry.id)}
                         >
                           Test
@@ -323,6 +409,11 @@ export default function SettingsPage() {
                           type="button"
                           className="btn btn-ghost"
                           disabled={busy}
+                          title={
+                            entries.length <= 1
+                              ? "Clear the API key for this provider"
+                              : "Remove this provider from the list"
+                          }
                           onClick={() => setDeleteId(entry.id)}
                         >
                           {entries.length <= 1 ? "Clear key" : "Delete"}
@@ -518,6 +609,128 @@ export default function SettingsPage() {
           </div>
         ) : null}
 
+        {section === "stats" ? (
+          <div className="panel p-6">
+            <div className="settings-section">
+              <h2 className="t-h2 text-[var(--text-primary)]">AI usage</h2>
+              <p className="t-body-sm mt-1 text-[var(--text-secondary)]">
+                Token and call counts from this server since the last reset.
+              </p>
+            </div>
+
+            {statsBusy && !stats ? (
+              <p className="t-body-sm text-[var(--text-muted)]">Loading…</p>
+            ) : stats ? (
+              <>
+                <div className="settings-section">
+                  <div className="stats ai-stats">
+                    <div className="stat">
+                      <b>{stats.calls}</b>
+                      <span>Calls</span>
+                    </div>
+                    <div className="stat">
+                      <b>{stats.successes}</b>
+                      <span>OK</span>
+                    </div>
+                    <div className="stat">
+                      <b>{stats.failures}</b>
+                      <span>Failed</span>
+                    </div>
+                    <div className="stat acc">
+                      <b>{formatTokens(stats.totalTokens)}</b>
+                      <span>Tokens</span>
+                    </div>
+                  </div>
+                  <p className="t-caption mt-3 text-[var(--text-muted)]">
+                    Prompt {formatTokens(stats.promptTokens)} · Completion{" "}
+                    {formatTokens(stats.completionTokens)}
+                    {stats.lastCallAt
+                      ? ` · Last call ${formatWhen(stats.lastCallAt)}`
+                      : ""}
+                    {" · "}Since {formatWhen(stats.since)}
+                  </p>
+                </div>
+
+                {opRows.length > 0 ? (
+                  <div className="settings-section">
+                    <p className="t-caption mb-2">By operation</p>
+                    <div className="ai-stats-table">
+                      {opRows.map(([op, row]) => (
+                        <div key={op} className="ai-stats-row">
+                          <span>{OP_LABELS[op] || op}</span>
+                          <span className="t-mono">
+                            {row.calls} · {formatTokens(row.tokens)} tok
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+
+                {provRows.length > 0 ? (
+                  <div className="settings-section">
+                    <p className="t-caption mb-2">By provider</p>
+                    <div className="ai-stats-table">
+                      {provRows.map(([prov, row]) => (
+                        <div key={prov} className="ai-stats-row">
+                          <span>
+                            {PROVIDER_INFO[prov as LLMProvider]?.name || prov}
+                            {row.model ? (
+                              <span className="t-mono text-[var(--text-muted)]">
+                                {" "}
+                                · {row.model}
+                              </span>
+                            ) : null}
+                          </span>
+                          <span className="t-mono">
+                            {row.calls} · {formatTokens(row.tokens)} tok
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+
+                {stats.calls === 0 ? (
+                  <p className="t-body-sm text-[var(--text-muted)]">
+                    No AI calls recorded yet. Tailor a resume or run a connection
+                    test to start tracking.
+                  </p>
+                ) : null}
+
+                <div className="panel-footer">
+                  <button
+                    type="button"
+                    className="btn btn-ghost"
+                    disabled={statsBusy}
+                    onClick={() => {
+                      setStatsBusy(true);
+                      void fetchLlmStats()
+                        .then(setStats)
+                        .catch(() => toast.error("Could not refresh"))
+                        .finally(() => setStatsBusy(false));
+                    }}
+                  >
+                    Refresh
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-ghost"
+                    disabled={statsBusy || stats.calls === 0}
+                    onClick={() => setResetStatsOpen(true)}
+                  >
+                    Reset counters
+                  </button>
+                </div>
+              </>
+            ) : (
+              <p className="t-body-sm text-[var(--text-muted)]">
+                Usage data unavailable.
+              </p>
+            )}
+          </div>
+        ) : null}
+
         {section === "danger" ? (
           <div className="panel danger-panel p-6">
             <h2 className="t-h2" style={{ color: "var(--text-danger)" }}>
@@ -562,6 +775,15 @@ export default function SettingsPage() {
         onConfirm={() => {
           if (deleteId) void onDeleteEntry(deleteId);
         }}
+      />
+
+      <ConfirmModal
+        open={resetStatsOpen}
+        title="Reset AI usage?"
+        description="Call and token counters will be cleared. This does not affect your API keys or resumes."
+        confirmLabel="Reset"
+        onCancel={() => setResetStatsOpen(false)}
+        onConfirm={() => void onResetStats()}
       />
     </div>
   );

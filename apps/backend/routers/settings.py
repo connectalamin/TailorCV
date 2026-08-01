@@ -75,6 +75,39 @@ def test_llm(
     return schemas.TestOut(ok=ok, message=msg)
 
 
+def _stats_out(raw: dict) -> schemas.LlmStatsOut:
+    by_op = {
+        k: schemas.LlmOpStats(**v) if isinstance(v, dict) else schemas.LlmOpStats()
+        for k, v in (raw.get("byOperation") or {}).items()
+    }
+    by_prov = {
+        k: schemas.LlmOpStats(**v) if isinstance(v, dict) else schemas.LlmOpStats()
+        for k, v in (raw.get("byProvider") or {}).items()
+    }
+    return schemas.LlmStatsOut(
+        since=raw.get("since") or "",
+        calls=int(raw.get("calls") or 0),
+        successes=int(raw.get("successes") or 0),
+        failures=int(raw.get("failures") or 0),
+        promptTokens=int(raw.get("promptTokens") or 0),
+        completionTokens=int(raw.get("completionTokens") or 0),
+        totalTokens=int(raw.get("totalTokens") or 0),
+        byOperation=by_op,
+        byProvider=by_prov,
+        lastCallAt=raw.get("lastCallAt"),
+    )
+
+
+@router.get("/llm/stats", response_model=schemas.LlmStatsOut)
+def get_llm_stats(db: Connection = Depends(get_conn)):
+    return _stats_out(storage.get_llm_stats(db))
+
+
+@router.delete("/llm/stats", response_model=schemas.LlmStatsOut)
+def reset_llm_stats(db: Connection = Depends(get_conn)):
+    return _stats_out(storage.reset_llm_stats(db))
+
+
 @router.get("/status", response_model=schemas.SystemStatus)
 def status(db: Connection = Depends(get_conn)):
     cfg = storage.get_llm(db)

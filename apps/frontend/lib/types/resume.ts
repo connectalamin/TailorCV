@@ -69,8 +69,15 @@ export type ResumeListItem = {
   status: ProcessingStatus;
   company?: string;
   role?: string;
+  location?: string;
+  employmentType?: string;
+  salary?: string;
+  deadline?: string;
+  startDate?: string;
   updatedAt: string;
   sourceFile?: string;
+  /** JD↔resume keyword / ATS overlap % when available */
+  match?: number;
 };
 
 export type ResumeRecord = ResumeListItem & {
@@ -90,6 +97,11 @@ export type Application = {
   id: string;
   company: string;
   role: string;
+  location?: string;
+  employmentType?: string;
+  salary?: string;
+  deadline?: string;
+  startDate?: string;
   status: ApplicationStatus;
   notes?: string;
   match?: number;
@@ -136,7 +148,47 @@ export type SystemStatus = {
   lastChecked: string;
 };
 
+export type LlmOpStats = {
+  calls: number;
+  successes: number;
+  failures: number;
+  tokens: number;
+  model?: string;
+};
+
+export type LlmStats = {
+  since: string;
+  calls: number;
+  successes: number;
+  failures: number;
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+  byOperation: Record<string, LlmOpStats>;
+  byProvider: Record<string, LlmOpStats>;
+  lastCallAt: string | null;
+};
+
 export type KeywordHit = { k: string; m: number };
+
+export type AiMatchCategory = {
+  id: string;
+  label: string;
+  score: number;
+};
+
+export type AiMatchResult = {
+  keywords: KeywordHit[];
+  notes: string;
+  score: number;
+  heuristicRate: number;
+  keywordFound?: number;
+  keywordTotal?: number;
+  matchedSkills?: string[];
+  missingSkills: string[];
+  categories: AiMatchCategory[];
+  source?: "llm" | "keyword";
+};
 
 export type ImproveResult = {
   resume_id: string;
@@ -146,5 +198,42 @@ export type ImproveResult = {
   intensity: TailorIntensity | string;
   keywords: KeywordHit[];
   status: string;
+  data?: ResumeData;
+};
+
+export type ContentIssueSeverity = "info" | "warn" | "fail";
+export type ContentCategoryStatus = "ok" | "warn" | "fail";
+
+export type ContentIssue = {
+  category: string;
+  severity: ContentIssueSeverity;
+  message: string;
+  location?: string | null;
+  suggestion?: string | null;
+};
+
+export type ContentCategoryScore = {
+  id: string;
+  label: string;
+  score: number;
+  issueCount: number;
+  status: ContentCategoryStatus;
+};
+
+export type ContentCheckResult = {
+  score: number;
+  issueCount: number;
+  categories: ContentCategoryScore[];
+  issues: ContentIssue[];
+};
+
+export type AtsChatMessage = {
+  role: "user" | "assistant";
+  content: string;
+};
+
+export type AtsChatResult = {
+  reply: string;
+  applied: boolean;
   data?: ResumeData;
 };

@@ -8,6 +8,11 @@ import {
   masterFromUpload,
 } from "@/lib/mock/data";
 import type {
+  AiMatchResult,
+  AtsChatMessage,
+  AtsChatResult,
+  ContentCheckResult,
+  ContentIssue,
   KeywordHit,
   ImproveResult,
   ResumeData,
@@ -296,6 +301,8 @@ export async function downloadResumePdf(
     pageSize?: "A4" | "LETTER";
     marginIn?: number;
     projectsTwoColumn?: boolean;
+    /** Default true; set false when enabling two-column dense layout. */
+    atsSafe?: boolean;
   },
 ): Promise<Blob> {
   let record: ResumeRecord | undefined;
@@ -311,14 +318,18 @@ export async function downloadResumePdf(
   }
   if (!record) throw new Error("Resume not found");
 
+  const projectsTwoColumn = opts?.projectsTwoColumn ?? false;
+  const atsSafe = opts?.atsSafe ?? !projectsTwoColumn;
+
   const res = await fetch(`${API_URL}/api/compile-resume`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       data: record.data,
-      pageSize: opts?.pageSize || "LETTER",
-      marginIn: opts?.marginIn ?? 0.75,
-      projectsTwoColumn: opts?.projectsTwoColumn ?? true,
+      pageSize: opts?.pageSize || "A4",
+      marginIn: opts?.marginIn ?? 0.6,
+      projectsTwoColumn,
+      atsSafe,
       filename: record.data.name,
     }),
   });
@@ -452,7 +463,7 @@ export async function aiMatchJd(
   id: string,
   jd: string,
   data?: ResumeData,
-): Promise<{ keywords: KeywordHit[]; notes: string }> {
+): Promise<AiMatchResult> {
   if (USE_MOCK_API) {
     await delay(700);
     void id;
@@ -460,10 +471,164 @@ export async function aiMatchJd(
     return {
       keywords: structuredClone(SAMPLE_KEYWORDS),
       notes: "Strong frontend overlap. Emphasize React and TypeScript in Objective.",
+      score: 72,
+      heuristicRate: 45,
+      keywordFound: 8,
+      keywordTotal: 14,
+      matchedSkills: ["React", "TypeScript", "Next.js"],
+      missingSkills: ["Docker", "Kubernetes"],
+      categories: [
+        { id: "keywords", label: "Keyword coverage", score: 45 },
+        { id: "skills", label: "Skills fit", score: 78 },
+        { id: "experience", label: "Experience fit", score: 70 },
+        { id: "ats_format", label: "ATS format", score: 88 },
+      ],
+      source: "llm",
     };
   }
   return jsonFetch(`/resumes/${encodeURIComponent(id)}/ai/match`, {
     method: "POST",
     body: JSON.stringify({ jd, data }),
+  });
+}
+
+export async function aiContentCheck(
+  id: string,
+  opts?: { jd?: string; data?: ResumeData },
+): Promise<ContentCheckResult> {
+  if (USE_MOCK_API) {
+    await delay(600);
+    void id;
+    return {
+      score: 72,
+      issueCount: 3,
+      categories: [
+        {
+          id: "spelling_grammar",
+          label: "Spelling & Grammar",
+          score: 85,
+          issueCount: 0,
+          status: "ok",
+        },
+        {
+          id: "quantifying_impact",
+          label: "Quantifying Impact",
+          score: 55,
+          issueCount: 2,
+          status: "warn",
+        },
+        {
+          id: "repetition",
+          label: "Repetition",
+          score: 90,
+          issueCount: 0,
+          status: "ok",
+        },
+        {
+          id: "ats_essentials",
+          label: "ATS Essentials",
+          score: 80,
+          issueCount: 1,
+          status: "ok",
+        },
+      ],
+      issues: [
+        {
+          category: "quantifying_impact",
+          severity: "warn",
+          message: "Only 2/6 bullets include numbers or scale",
+          location: "bullets",
+          suggestion: "Add truthful metrics where you have them",
+        },
+        {
+          category: "quantifying_impact",
+          severity: "warn",
+          message: "Weak or vague bullet opener",
+          location: "exp[0]",
+          suggestion: "Lead with a strong verb",
+        },
+        {
+          category: "ats_essentials",
+          severity: "info",
+          message: "No Education section",
+          location: "edu",
+        },
+      ],
+    };
+  }
+  return jsonFetch(`/resumes/${encodeURIComponent(id)}/ai/content-check`, {
+    method: "POST",
+    body: JSON.stringify({ jd: opts?.jd ?? "", data: opts?.data }),
+  });
+}
+
+export async function aiContentFix(
+  id: string,
+  opts?: { jd?: string; data?: ResumeData; issues?: ContentIssue[] },
+): Promise<ResumeData> {
+  if (USE_MOCK_API) {
+    await delay(800);
+    ensureLoaded();
+    const found = resumes.find((r) => r.id === id);
+    const data = structuredClone(opts?.data || found?.data || SAMPLE_RESUME);
+    data.summary = data.summary.replace(/\s+/g, " ").trim();
+    return data;
+  }
+  const res = await jsonFetch<{ data: ResumeData }>(
+    `/resumes/${encodeURIComponent(id)}/ai/content-fix`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        jd: opts?.jd ?? "",
+        data: opts?.data,
+        issues: opts?.issues ?? [],
+      }),
+    },
+  );
+  return res.data;
+}
+
+export async function aiAtsChat(
+  id: string,
+  opts: {
+    message: string;
+    jd?: string;
+    data?: ResumeData;
+    missingSkills?: string[];
+    history?: AtsChatMessage[];
+  },
+): Promise<AtsChatResult> {
+  if (USE_MOCK_API) {
+    await delay(700);
+    ensureLoaded();
+    const found = resumes.find((r) => r.id === id);
+    const data = structuredClone(opts.data || found?.data || SAMPLE_RESUME);
+    const askRaise = /score|gap|improve|raise|fix|apply/i.test(opts.message);
+    if (askRaise) {
+      data.summary = `${data.summary} Aligned to the target role.`
+        .trim()
+        .slice(0, 320);
+      return {
+        reply:
+          "I tightened the Objective and skills for this JD. Re-check ATS fit, then Save.",
+        applied: true,
+        data,
+      };
+    }
+    return {
+      reply:
+        "Ask me to raise your ATS score or close the skills gap and I’ll edit the resume.",
+      applied: false,
+    };
+  }
+  return jsonFetch(`/resumes/${encodeURIComponent(id)}/ai/ats-chat`, {
+    method: "POST",
+    body: JSON.stringify({
+      message: opts.message,
+      jd: opts.jd ?? "",
+      data: opts.data,
+      missingSkills: opts.missingSkills ?? [],
+      history: opts.history ?? [],
+    }),
   });
 }

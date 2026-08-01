@@ -31,11 +31,12 @@ def compile_resume(body: schemas.CompileReq):
             )
         tex = tex_gen.build(
             body.data.model_dump(mode="json"),
-            page_size=body.pageSize or "LETTER",
-            margin_in=body.marginIn if body.marginIn is not None else 0.75,
+            page_size=body.pageSize or "A4",
+            margin_in=body.marginIn if body.marginIn is not None else 0.6,
             projects_two_column=bool(body.projectsTwoColumn)
             if body.projectsTwoColumn is not None
-            else True,
+            else False,
+            ats_safe=bool(body.atsSafe) if body.atsSafe is not None else True,
         )
     result = tex_compile.compile_pdf(tex)
     if not result.ok or not result.pdf:

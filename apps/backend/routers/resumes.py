@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 import time
 import uuid
 
@@ -12,6 +13,8 @@ import config
 import schemas
 from db import get_conn
 from services import improver, llm as llm_svc, parser, storage, templates
+from services import content_check as content_check_svc
+from services import keywords as kw_svc
 from services.skills_fmt import categorize_skills
 
 router = APIRouter()
@@ -115,7 +118,14 @@ def improve_preview(
         f"{data.get('name','')}|{(data.get('contact') or {}).get('email','')}".encode()
     ).hexdigest()[:16]
 
-    role = base.get("role") or data.get("title") or (job or {}).get("role") or ""
+    job_company = (job or {}).get("company") or None
+    job_role = (job or {}).get("role") or None
+    job_location = (job or {}).get("location") or None
+    job_employment_type = (job or {}).get("employment_type") or None
+    job_salary = (job or {}).get("salary") or None
+    job_deadline = (job or {}).get("deadline") or None
+    job_start_date = (job or {}).get("start_date") or None
+    role = job_role or base.get("role") or data.get("title") or ""
     cfg = storage.get_llm(db)
     intensity = improver.normalize_intensity(body.intensity)
 
@@ -134,7 +144,14 @@ def improve_preview(
     new_data["contact"] = dict(data.get("contact") or {})
 
     person = (data.get("name") or "").strip() or "Resume"
-    company = base.get("company") or (job or {}).get("company") or "Target Company"
+    # Prefer JD metadata for tracker/application fields; resume title stays in data
+    company = job_company or base.get("company") or "Target Company"
+    app_role = job_role or new_data.get("title") or role or None
+    location = job_location or base.get("location") or None
+    employment_type = job_employment_type or base.get("employmentType") or None
+    salary = job_salary or base.get("salary") or None
+    deadline = job_deadline or base.get("deadline") or None
+    start_date = job_start_date or base.get("startDate") or None
     new_id = f"tailored-{int(time.time() * 1000)}"
     preview_hash = result["preview_hash"] + ":" + personal_fingerprint
 
@@ -145,7 +162,12 @@ def improve_preview(
         is_master=False,
         status="preview",
         company=company,
-        role=new_data.get("title") or role or None,
+        role=app_role,
+        location=location,
+        employment_type=employment_type,
+        salary=salary,
+        deadline=deadline,
+        start_date=start_date,
         data=new_data,
         job_description=jd or None,
         cover_letter=result["cover_letter"],
@@ -172,7 +194,7 @@ def improve_preview(
 def confirm(rid: str, body: schemas.ConfirmReq, db: Connection = Depends(get_conn)):
     """Persist tailored resume only if preview_hash matches."""
     row = db.execute(
-        "SELECT preview_hash, status, parent_id, company, role, intensity FROM resumes WHERE id=?",
+        "SELECT preview_hash, status, parent_id, company, role, location, employment_type, salary, deadline, start_date, intensity FROM resumes WHERE id=?",
         (rid,),
     ).fetchone()
     if not row:
@@ -196,13 +218,20 @@ def confirm(rid: str, body: schemas.ConfirmReq, db: Connection = Depends(get_con
     )
 
     if body.create_application:
+        match = storage.match_rate_for_resume(db, rid)
         storage.create_application(
             db,
             {
                 "company": row["company"] or "Target Company",
                 "role": row["role"] or "Role",
-                "status": "applied",
+                "location": row["location"],
+                "employmentType": row["employment_type"],
+                "salary": row["salary"],
+                "deadline": row["deadline"],
+                "startDate": row["start_date"],
+                "status": "wish",
                 "resumeId": rid,
+                "match": match,
                 "notes": f"Tailored ({row['intensity'] or 'balanced'})",
             },
         )
@@ -331,11 +360,233 @@ def ai_match(
     data = (body.data.model_dump(mode="json") if body.data else None) or dict(
         rec.get("data") or {}
     )
-    keywords = improver.extract_job_keywords(jd, cfg)
+
+    # Local extractor first — instant evidence + LLM prompt enrichment.
+    heuristic = kw_svc.score_overlap(data, jd)
+    heuristic_rate = int(heuristic.get("rate") or 0)
+    local_keywords = list(heuristic.get("keywords") or [])
+    local_matched = list(heuristic.get("matched") or heuristic.get("matches") or [])
+    local_missing = [
+        str(k)
+        for k in (heuristic.get("missing") or [])
+        if kw_svc.is_skill_keyword(str(k))
+    ]
+    keyword_total = int(heuristic.get("total_keywords") or len(local_keywords))
+    keyword_found = len(local_matched)
+
+    # Prefer local skill list for UI keywords; fall back to improver/LLM extract.
+    panel_hits = [
+        h
+        for h in kw_svc.extract(jd)
+        if isinstance(h, dict) and kw_svc.is_skill_keyword(str(h.get("k") or ""))
+    ]
+    if not panel_hits:
+        panel_hits = [
+            h
+            for h in improver.extract_job_keywords(jd, cfg)
+            if isinstance(h, dict) and kw_svc.is_skill_keyword(str(h.get("k") or ""))
+        ]
+
+    source: str = "keyword"
+    score = heuristic_rate
     notes = ""
+    categories: list[schemas.AiMatchCategory] = []
+    missing_skills = [str(k) for k in local_missing[:12]]
+
     if llm_svc.is_configured(cfg):
-        notes = llm_svc.match_notes(data, jd, keywords, cfg) or ""
+        assessed = llm_svc.ats_assess(
+            data,
+            jd,
+            panel_hits,
+            cfg,
+            heuristic_rate=heuristic_rate,
+            local_keywords=local_keywords,
+            local_matched=local_matched,
+            local_missing=local_missing,
+        )
+        if assessed:
+            source = "llm"
+            try:
+                score = max(0, min(100, int(assessed.get("score"))))
+            except (TypeError, ValueError):
+                score = heuristic_rate
+            notes = str(assessed.get("notes") or "").strip()
+            llm_missing: list[str] = []
+            for raw in assessed.get("missing_skills") or []:
+                s = str(raw).strip()
+                if not s:
+                    continue
+                # Drop fluff; keep skill tokens or multi-word phrases that contain one
+                parts = [p for p in re.split(r"[\s,/|]+", s.lower()) if p]
+                if not (
+                    kw_svc.is_skill_keyword(s)
+                    or any(kw_svc.is_skill_keyword(p) for p in parts)
+                ):
+                    continue
+                if s not in llm_missing:
+                    llm_missing.append(s)
+                if len(llm_missing) >= 12:
+                    break
+            # Prefer local missing for the skills-gap list (precise); LLM notes for nuance.
+            if llm_missing:
+                merged = list(local_missing[:10])
+                for s in llm_missing:
+                    low = s.lower()
+                    if not any(low in m.lower() or m.lower() in low for m in merged):
+                        merged.append(s)
+                    if len(merged) >= 12:
+                        break
+                missing_skills = merged
+            for raw in assessed.get("categories") or []:
+                if not isinstance(raw, dict):
+                    continue
+                cid = str(raw.get("id") or "").strip()
+                label = str(raw.get("label") or cid).strip()
+                if not cid:
+                    continue
+                try:
+                    cscore = max(0, min(100, int(raw.get("score"))))
+                except (TypeError, ValueError):
+                    continue
+                categories.append(
+                    schemas.AiMatchCategory(id=cid, label=label or cid, score=cscore)
+                )
+        else:
+            notes = (
+                "AI analysis unavailable — showing keyword coverage only. "
+                "Check your model/API key in Settings, then re-check."
+            )
+    else:
+        notes = (
+            "AI analysis unavailable — showing keyword coverage only. "
+            "Add an API key in Settings for a full ATS fit score."
+        )
+
+    if not any(c.id == "keywords" for c in categories):
+        categories.insert(
+            0,
+            schemas.AiMatchCategory(
+                id="keywords", label="Keyword coverage", score=heuristic_rate
+            ),
+        )
+
+    if jd and jd != (rec.get("jobDescription") or ""):
+        storage.update_resume(db, rid, {"jobDescription": jd})
+    storage.set_applications_match(db, rid, score)
+
     return schemas.AiMatchOut(
-        keywords=[schemas.KeywordHit(**h) for h in keywords],
+        keywords=[schemas.KeywordHit(**h) for h in panel_hits],
         notes=notes,
+        score=score,
+        heuristicRate=heuristic_rate,
+        keywordFound=keyword_found,
+        keywordTotal=keyword_total,
+        matchedSkills=[str(k) for k in local_matched[:24]],
+        missingSkills=missing_skills,
+        categories=categories,
+        source=source,  # type: ignore[arg-type]
     )
+
+
+@router.post("/resumes/{rid}/ai/content-check", response_model=schemas.AiContentCheckOut)
+def ai_content_check(
+    rid: str, body: schemas.AiContentCheckReq | None = None, db: Connection = Depends(get_conn)
+):
+    rec = storage.get_resume(db, rid, with_data=True)
+    if not rec:
+        raise HTTPException(404, "Resume not found")
+    cfg = storage.get_llm(db)
+    data = (
+        body.data.model_dump(mode="json") if body and body.data else None
+    ) or dict(rec.get("data") or {})
+    jd = (
+        (body.jd if body else None) or rec.get("jobDescription") or ""
+    ).strip()
+    result = content_check_svc.run_content_check(data, cfg, jd=jd)
+    return schemas.AiContentCheckOut(
+        score=int(result.get("score") or 0),
+        issueCount=int(result.get("issueCount") or 0),
+        categories=[
+            schemas.ContentCategoryScore(**c) for c in (result.get("categories") or [])
+        ],
+        issues=[schemas.ContentIssue(**i) for i in (result.get("issues") or [])],
+    )
+
+
+@router.post("/resumes/{rid}/ai/content-fix", response_model=schemas.AiContentFixOut)
+def ai_content_fix(
+    rid: str, body: schemas.AiContentFixReq | None = None, db: Connection = Depends(get_conn)
+):
+    rec = storage.get_resume(db, rid, with_data=True)
+    if not rec:
+        raise HTTPException(404, "Resume not found")
+    cfg = storage.get_llm(db)
+    if not llm_svc.is_configured(cfg):
+        raise HTTPException(400, "LLM not configured — add an API key in Settings")
+    data = (
+        body.data.model_dump(mode="json") if body and body.data else None
+    ) or dict(rec.get("data") or {})
+    jd = (
+        (body.jd if body else None) or rec.get("jobDescription") or ""
+    ).strip()
+    issues = []
+    if body and body.issues:
+        issues = [i.model_dump(mode="json") for i in body.issues]
+    fixed = content_check_svc.run_content_fix(data, cfg, jd=jd, issues=issues)
+    if not fixed:
+        raise HTTPException(502, "Content fix failed — try another model or check the API key")
+    try:
+        validated = schemas.ResumeData.model_validate(fixed)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(422, f"Invalid AI response shape: {e}")
+    return schemas.AiContentFixOut(data=validated)
+
+
+@router.post("/resumes/{rid}/ai/ats-chat", response_model=schemas.AiAtsChatOut)
+def ai_ats_chat(
+    rid: str, body: schemas.AiAtsChatReq, db: Connection = Depends(get_conn)
+):
+    rec = storage.get_resume(db, rid, with_data=True)
+    if not rec:
+        raise HTTPException(404, "Resume not found")
+    cfg = storage.get_llm(db)
+    if not llm_svc.is_configured(cfg):
+        raise HTTPException(400, "LLM not configured — add an API key in Settings")
+    message = (body.message or "").strip()
+    if len(message) < 2:
+        raise HTTPException(400, "Message too short")
+    data = (
+        body.data.model_dump(mode="json") if body.data else None
+    ) or dict(rec.get("data") or {})
+    jd = (body.jd or rec.get("jobDescription") or "").strip()
+    if len(jd) < 40:
+        raise HTTPException(400, "Paste a fuller job posting first")
+    history = [h.model_dump(mode="json") for h in (body.history or [])]
+    raw = llm_svc.ats_coach(
+        data,
+        jd,
+        message,
+        cfg,
+        missing_skills=list(body.missingSkills or []),
+        history=history,
+    )
+    if not raw:
+        raise HTTPException(502, "ATS coach failed — try another model or check the API key")
+    reply = str(raw.get("reply") or "").strip() or "Done."
+    apply = bool(raw.get("apply"))
+    if not apply:
+        return schemas.AiAtsChatOut(reply=reply, applied=False, data=None)
+
+    diffs = {
+        "summary": raw.get("summary"),
+        "skills": raw.get("skills"),
+        "bullet_edits": raw.get("bullet_edits") or [],
+    }
+    out = improver.apply_diffs(data, diffs)
+    if "skills" in out:
+        out["skills"] = categorize_skills(out.get("skills") or [])
+    try:
+        validated = schemas.ResumeData.model_validate(out)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(422, f"Invalid AI response shape: {e}")
+    return schemas.AiAtsChatOut(reply=reply, applied=True, data=validated)

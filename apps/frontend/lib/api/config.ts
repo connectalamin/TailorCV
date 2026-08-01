@@ -13,6 +13,7 @@ import type {
   LLMEntry,
   LLMMode,
   LLMProvider,
+  LlmStats,
   SystemStatus,
 } from "@/lib/types/resume";
 
@@ -195,6 +196,41 @@ export async function testLlmConnection(
   });
 }
 
+const EMPTY_STATS: LlmStats = {
+  since: new Date().toISOString(),
+  calls: 0,
+  successes: 0,
+  failures: 0,
+  promptTokens: 0,
+  completionTokens: 0,
+  totalTokens: 0,
+  byOperation: {},
+  byProvider: {},
+  lastCallAt: null,
+};
+
+let mockStats: LlmStats = structuredClone(EMPTY_STATS);
+
+export async function fetchLlmStats(): Promise<LlmStats> {
+  if (USE_MOCK_API) {
+    await delay(120);
+    return structuredClone(mockStats);
+  }
+  return jsonFetch<LlmStats>("/llm/stats");
+}
+
+export async function resetLlmStats(): Promise<LlmStats> {
+  if (USE_MOCK_API) {
+    await delay(150);
+    mockStats = {
+      ...structuredClone(EMPTY_STATS),
+      since: new Date().toISOString(),
+    };
+    return structuredClone(mockStats);
+  }
+  return jsonFetch<LlmStats>("/llm/stats", { method: "DELETE" });
+}
+
 export async function fetchSystemStatus(): Promise<SystemStatus> {
   if (USE_MOCK_API) {
     await delay(150);
@@ -235,9 +271,16 @@ export async function listApplications(): Promise<
 export async function createApplication(payload: {
   company: string;
   role: string;
+  location?: string;
+  employmentType?: string;
+  salary?: string;
+  deadline?: string;
+  startDate?: string;
   notes?: string;
   status?: ApplicationStatus;
   template?: string;
+  match?: number;
+  resumeId?: string;
 }): Promise<Application> {
   if (USE_MOCK_API) {
     await delay(200);
@@ -246,11 +289,17 @@ export async function createApplication(payload: {
       id: `app-${Date.now()}`,
       company: payload.company,
       role: payload.role,
+      location: payload.location,
+      employmentType: payload.employmentType,
+      salary: payload.salary,
+      deadline: payload.deadline,
+      startDate: payload.startDate,
       notes: payload.notes,
       status: payload.status || "wish",
-      match: 70 + Math.floor(Math.random() * 25),
+      match: payload.match ?? 0,
       template: payload.template || "latex",
       dateLabel: "now",
+      resumeId: payload.resumeId,
     };
     apps = [...apps, app];
     persistApps();
@@ -264,7 +313,21 @@ export async function createApplication(payload: {
 
 export async function updateApplication(
   id: string,
-  payload: Partial<Pick<Application, "status" | "notes" | "company" | "role">>,
+  payload: Partial<
+    Pick<
+      Application,
+      | "status"
+      | "notes"
+      | "company"
+      | "role"
+      | "location"
+      | "employmentType"
+      | "salary"
+      | "deadline"
+      | "startDate"
+      | "match"
+    >
+  >,
 ): Promise<Application> {
   if (USE_MOCK_API) {
     await delay(150);

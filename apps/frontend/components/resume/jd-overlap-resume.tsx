@@ -79,7 +79,7 @@ export function JdOverlapResume({
           <p className="jd-overlap-sub">(matching keywords highlighted)</p>
         </div>
         <div className={`jd-overlap-rate ${rateTone(rate)}`}>
-          <span className="jd-overlap-rate-label">Match rate</span>
+          <span className="jd-overlap-rate-label">ATS fit</span>
           <strong>{rate}%</strong>
         </div>
       </div>

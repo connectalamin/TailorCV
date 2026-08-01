@@ -62,6 +62,31 @@ def extract_job_keywords(jd: str, cfg: dict) -> list[dict]:
     return kw_svc.extract(jd)
 
 
+def extract_job_metadata(jd: str, cfg: dict) -> dict:
+    """
+    Company/role plus optional location/type/salary/deadline/startDate from a JD.
+    LLM only — empty fields when the model cannot extract them.
+    """
+    meta: dict = {
+        "company": None,
+        "role": None,
+        "location": None,
+        "type": None,
+        "salary": None,
+        "deadline": None,
+        "startDate": None,
+    }
+    if not jd.strip() or not llm_svc.is_configured(cfg):
+        return meta
+
+    llm_meta = llm_svc.extract_job_metadata(jd, cfg)
+    if llm_meta:
+        for key in meta:
+            if llm_meta.get(key):
+                meta[key] = llm_meta[key]
+    return meta
+
+
 def _resume_blob(data: dict) -> str:
     parts: list[str] = [
         str(data.get("summary") or ""),
@@ -289,6 +314,112 @@ def refine_keywords(data: dict, keyword_hits: list[dict]) -> dict:
     return out
 
 
+def _merge_shortened(original: dict, shortened: dict) -> dict:
+    """Merge LLM one-page compression into the resume; lock identity fields."""
+    out = copy.deepcopy(original)
+    if isinstance(shortened.get("summary"), str):
+        text = shortened["summary"].strip()
+        if text:
+            out["summary"] = text[:400]
+    if "skills" in shortened:
+        skills = _skills_from_diff(shortened.get("skills"))
+        if skills:
+            out["skills"] = categorize_skills(skills)
+    for key in ("exp", "projects", "edu", "awards", "certs", "activities", "langs"):
+        val = shortened.get(key)
+        if isinstance(val, list) and val:
+            out[key] = val
+    out["name"] = original.get("name") or out.get("name")
+    out["contact"] = dict(original.get("contact") or {})
+    if original.get("title") and not out.get("title"):
+        out["title"] = original.get("title")
+    return out
+
+
+def _compile_pages(
+    data: dict,
+    *,
+    page_size: str = "A4",
+    margin_in: float = 0.6,
+) -> tuple[int, bool]:
+    """Return (page_count, compile_ok). page_count is 0 when compile fails."""
+    from services import compile as tex_compile
+    from services import latex as tex_gen
+
+    if not tex_compile.latex_available():
+        return 0, False
+    tex = tex_gen.build(
+        data,
+        page_size=page_size,
+        margin_in=margin_in,
+        ats_safe=True,
+    )
+    result = tex_compile.compile_pdf(tex)
+    if not result.ok:
+        return 0, False
+    return max(int(result.pages or 0), 1), True
+
+
+def fit_to_one_page(
+    data: dict,
+    cfg: dict,
+    *,
+    page_size: str = "A4",
+    margin_in: float = 0.6,
+) -> tuple[dict, dict[str, Any]]:
+    """
+    Layout-first one-page fit: compile with A4 defaults; only call the LLM
+    to shorten when the PDF is still more than one page.
+    """
+    meta: dict[str, Any] = {
+        "pages_before": 0,
+        "pages_after": 0,
+        "shortened": False,
+        "skipped": None,
+    }
+    pages, ok = _compile_pages(data, page_size=page_size, margin_in=margin_in)
+    if not ok:
+        meta["skipped"] = "compile_unavailable"
+        return data, meta
+
+    meta["pages_before"] = pages
+    meta["pages_after"] = pages
+    if pages <= 1:
+        return data, meta
+
+    if not llm_svc.is_configured(cfg):
+        meta["skipped"] = "llm_not_configured"
+        return data, meta
+
+    out = copy.deepcopy(data)
+    for aggressive in (False, True):
+        patch = llm_svc.shorten_for_one_page(
+            out,
+            cfg,
+            page_size=page_size,
+            margin_in=margin_in,
+            pages=pages,
+            aggressive=aggressive,
+        )
+        if not patch:
+            meta["skipped"] = "llm_failed"
+            break
+        out = _merge_shortened(out, patch)
+        out["skills"] = categorize_skills(out.get("skills") or [])
+        meta["shortened"] = True
+        pages2, ok2 = _compile_pages(out, page_size=page_size, margin_in=margin_in)
+        if ok2:
+            meta["pages_after"] = pages2
+            pages = pages2
+            if pages2 <= 1:
+                meta["skipped"] = None
+                break
+        else:
+            break
+
+    return out, meta
+
+
 def improve_resume(
     data: dict,
     jd: str,
@@ -334,6 +465,7 @@ def improve_resume(
     improved = apply_diffs(base, diffs)
     improved = safety_nets(base, improved, keyword_hits)
     improved = refine_keywords(improved, keyword_hits)
+    improved, fit_meta = fit_to_one_page(improved, cfg)
 
     cover = ""
     outreach = ""
@@ -364,6 +496,7 @@ def improve_resume(
         "cover_letter": cover,
         "outreach_message": outreach,
         "level_gap_note": level_gap,
+        "fit": fit_meta,
     }
     improved["skills"] = categorize_skills(improved.get("skills") or [])
     payload["data"] = improved
@@ -374,6 +507,7 @@ def improve_resume(
         "outreach_message": outreach,
         "intensity": intensity,
         "level_gap_note": level_gap,
+        "fit": fit_meta,
         "preview_hash": preview_hash_for(payload),
         "preview_payload": payload,
     }

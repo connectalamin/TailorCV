@@ -1,12 +1,13 @@
 import type { Metadata } from "next";
-import { JetBrains_Mono, Source_Serif_4 } from "next/font/google";
+import { DM_Sans, JetBrains_Mono } from "next/font/google";
 import { Toaster } from "sonner";
 import "./globals.css";
 
-const serif = Source_Serif_4({
+const body = DM_Sans({
   subsets: ["latin"],
-  variable: "--font-serif",
+  variable: "--font-body-family",
   display: "swap",
+  weight: ["400", "500", "600", "700"],
 });
 
 const mono = JetBrains_Mono({
@@ -26,13 +27,19 @@ export default function RootLayout({
 }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="en" suppressHydrationWarning>
+      <head>
+        <link
+          href="https://api.fontshare.com/v2/css?f[]=general-sans@500,600,700&display=swap"
+          rel="stylesheet"
+        />
+      </head>
       <body
-        className={`${serif.variable} ${mono.variable} antialiased`}
+        className={`${body.variable} ${mono.variable} antialiased`}
         suppressHydrationWarning
       >
         {children}
         <Toaster
-          theme="dark"
+          theme="light"
           position="bottom-right"
           richColors
           closeButton

@@ -13,7 +13,11 @@ import {
 } from "react";
 import { ResumePreview } from "@/components/resume/resume-preview";
 import { JdOverlapResume } from "@/components/resume/jd-overlap-resume";
+import { ContentCheckerPanel } from "@/components/resume/content-checker-panel";
 import {
+  aiAtsChat,
+  aiContentCheck,
+  aiContentFix,
   aiGenerateCover,
   aiGenerateOutreach,
   aiMatchJd,
@@ -33,6 +37,10 @@ import {
   defaultOutreachMail,
 } from "@/lib/mock/data";
 import type {
+  AiMatchCategory,
+  AtsChatMessage,
+  ContentCheckResult,
+  ContentIssue,
   KeywordHit,
   ResumeData,
   ResumeRecord,
@@ -58,7 +66,7 @@ const DOC_TABS: { id: DocTab; label: string }[] = [
   { id: "resume", label: "Resume" },
   { id: "cover", label: "Cover letter" },
   { id: "outreach", label: "Outreach mail" },
-  { id: "jd", label: "JD match" },
+  { id: "jd", label: "ATS fit" },
 ];
 
 function loadSettings(): TemplateSettings {
@@ -105,9 +113,25 @@ export default function BuilderClient() {
   const [panelW, setPanelW] = useState(PANEL_W_DEFAULT);
   const [aiNotes, setAiNotes] = useState("");
   const [aiKeywords, setAiKeywords] = useState<KeywordHit[]>([]);
+  const [aiScore, setAiScore] = useState<number | null>(null);
+  const [aiHeuristicRate, setAiHeuristicRate] = useState<number | null>(null);
+  const [aiKeywordFound, setAiKeywordFound] = useState<number | null>(null);
+  const [aiKeywordTotal, setAiKeywordTotal] = useState<number | null>(null);
+  const [aiMatchedSkills, setAiMatchedSkills] = useState<string[]>([]);
+  const [aiCategories, setAiCategories] = useState<AiMatchCategory[]>([]);
+  const [aiMissingSkills, setAiMissingSkills] = useState<string[]>([]);
+  const [aiSource, setAiSource] = useState<"llm" | "keyword" | null>(null);
+  const [contentCheck, setContentCheck] = useState<ContentCheckResult | null>(
+    null,
+  );
+  const [atsChat, setAtsChat] = useState<AtsChatMessage[]>([]);
+  const [atsChatInput, setAtsChatInput] = useState("");
+  const [atsChatBusy, setAtsChatBusy] = useState(false);
   const sheetRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
   const panelWRef = useRef(PANEL_W_DEFAULT);
+  const atsReqRef = useRef(0);
+  const lastAtsKeyRef = useRef("");
 
   const id = params.get("id");
 
@@ -177,6 +201,20 @@ export default function BuilderClient() {
     const plain = resumeToPlainText(data);
     return matchKeywords(plain, keywords);
   }, [data, keywords]);
+  // Official score is LLM when available; keyword % is evidence only (never the headline competitor).
+  const hasOfficial = aiScore != null;
+  const isKeywordFallback = aiSource === "keyword";
+  const displayRate = hasOfficial
+    ? (aiScore as number)
+    : jd.trim()
+      ? match.rate
+      : 0;
+  const coverageFound = aiKeywordFound ?? match.matches.length;
+  const coverageTotal = aiKeywordTotal ?? keywords.length;
+  const skeletonMatched =
+    aiMatchedSkills.length > 0 ? aiMatchedSkills : match.matches;
+  const skeletonMissing =
+    aiMissingSkills.length > 0 ? aiMissingSkills : match.missing;
 
   function patchSettings(p: Partial<TemplateSettings>) {
     setSettings((s) => ({ ...s, ...p }));
@@ -212,6 +250,8 @@ export default function BuilderClient() {
         pageSize: settings.pageSize,
         marginIn: Number((settings.margins.top / 25.4).toFixed(2)),
         projectsTwoColumn: settings.projectsTwoColumn,
+        // Dense two-column layout opts out of strict ATS single-column mode.
+        atsSafe: !settings.projectsTwoColumn,
       });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
@@ -245,18 +285,38 @@ export default function BuilderClient() {
     }
   }
 
-  async function onRewrite(section: string) {
-    const next = await runAi("Section rewritten", () =>
-      aiRewriteSection(id!, section, { jd, data, intensity: "balanced" }),
-    );
-    if (next) setData(next);
-  }
-
   async function onRestructure() {
     const next = await runAi("Structure rebuilt", () => restructureResume(id!));
     if (next) {
       setData(next.data);
       setRecord(next);
+    }
+  }
+
+  async function onContentCheck(): Promise<ContentCheckResult | null> {
+    if (!id) {
+      toast.message("Open a resume from Dashboard first");
+      return null;
+    }
+    const res = await runAi("Content check ready", () =>
+      aiContentCheck(id, { jd, data }),
+    );
+    if (res) setContentCheck(res);
+    return res;
+  }
+
+  async function onContentFix(issues: ContentIssue[]) {
+    if (!id) {
+      toast.message("Open a resume from Dashboard first");
+      return;
+    }
+    const next = await runAi("Issues fixed — Save to persist", () =>
+      aiContentFix(id, { jd, data, issues }),
+    );
+    if (next) {
+      setData(next);
+      const again = await aiContentCheck(id, { jd, data: next });
+      setContentCheck(again);
     }
   }
 
@@ -266,7 +326,7 @@ export default function BuilderClient() {
       return;
     }
     if (jd.trim().length < 40) {
-      toast.error("Paste a fuller job description in the JD tab first");
+      toast.error("Paste a fuller job posting in the ATS fit tab first");
       return;
     }
     setAiBusy(true);
@@ -299,23 +359,54 @@ export default function BuilderClient() {
     if (res?.outreach_message) setOutreach(res.outreach_message);
   }
 
-  async function onAiMatch() {
-    if (jd.trim().length < 40) {
-      toast.error("Paste a fuller job description first");
+  async function onAiMatch(opts?: { silent?: boolean }) {
+    if (!id) {
+      if (!opts?.silent) toast.message("Open a resume from Dashboard first");
       return;
     }
-    const res = await runAi("Match analysis ready", () =>
-      aiMatchJd(id!, jd, data),
-    );
-    if (res) {
+    const jdText = jd.trim();
+    if (jdText.length < 40) {
+      if (!opts?.silent) toast.error("Paste a fuller job posting first");
+      return;
+    }
+    const key = `${id}\n${jdText}`;
+    if (opts?.silent && key === lastAtsKeyRef.current && aiScore != null) {
+      return;
+    }
+    const req = ++atsReqRef.current;
+    setAiBusy(true);
+    try {
+      const res = await aiMatchJd(id, jdText, data);
+      if (req !== atsReqRef.current) return;
       setAiKeywords(res.keywords || []);
       setAiNotes(res.notes || "");
+      setAiScore(typeof res.score === "number" ? res.score : null);
+      setAiHeuristicRate(
+        typeof res.heuristicRate === "number" ? res.heuristicRate : null,
+      );
+      setAiKeywordFound(
+        typeof res.keywordFound === "number" ? res.keywordFound : null,
+      );
+      setAiKeywordTotal(
+        typeof res.keywordTotal === "number" ? res.keywordTotal : null,
+      );
+      setAiMatchedSkills(res.matchedSkills || []);
+      setAiCategories(res.categories || []);
+      setAiMissingSkills(res.missingSkills || []);
+      setAiSource(res.source === "keyword" ? "keyword" : "llm");
+      lastAtsKeyRef.current = key;
+      if (!opts?.silent) toast.success("ATS fit updated");
+    } catch (e) {
+      if (req !== atsReqRef.current) return;
+      toast.error(e instanceof Error ? e.message : "AI ATS check failed");
+    } finally {
+      if (req === atsReqRef.current) setAiBusy(false);
     }
   }
 
   async function onApplyMatchSuggestions() {
     if (!aiKeywords.length) {
-      toast.message("Run AI match first");
+      toast.message("Wait for ATS fit analysis first");
       return;
     }
     const next = await runAi("Suggestions applied", () =>
@@ -329,8 +420,77 @@ export default function BuilderClient() {
         intensity: "balanced",
       }).catch(() => null);
       if (obj) setData(obj);
+      lastAtsKeyRef.current = "";
+      void onAiMatch({ silent: true });
     }
   }
+
+  async function onAtsChatSend(rawMessage?: string) {
+    if (!id) {
+      toast.message("Open a resume from Dashboard first");
+      return;
+    }
+    const message = (rawMessage ?? atsChatInput).trim();
+    if (message.length < 2) return;
+    if (jd.trim().length < 40) {
+      toast.error("Paste a fuller job posting first");
+      return;
+    }
+    const history = atsChat.slice(-6);
+    const nextHistory: AtsChatMessage[] = [
+      ...atsChat,
+      { role: "user", content: message },
+    ];
+    setAtsChat(nextHistory);
+    setAtsChatInput("");
+    setAtsChatBusy(true);
+    try {
+      const res = await aiAtsChat(id, {
+        message,
+        jd,
+        data,
+        missingSkills: aiMissingSkills.length
+          ? aiMissingSkills
+          : match.missing.slice(0, 12),
+        history,
+      });
+      setAtsChat((prev) => [
+        ...prev,
+        { role: "assistant", content: res.reply || "Done." },
+      ]);
+      if (res.applied && res.data) {
+        setData(res.data);
+        lastAtsKeyRef.current = "";
+        toast.success("Resume updated — re-checking ATS fit");
+        void onAiMatch({ silent: true });
+      }
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "ATS coach failed");
+      setAtsChat((prev) => [
+        ...prev,
+        {
+          role: "assistant",
+          content: "Sorry — that request failed. Check Settings → API keys.",
+        },
+      ]);
+    } finally {
+      setAtsChatBusy(false);
+    }
+  }
+
+  // Auto-run ATS fit when this tab is open and the posting is long enough.
+  useEffect(() => {
+    if (tab !== "jd" || !id) return;
+    const jdText = jd.trim();
+    if (jdText.length < 40) return;
+    const key = `${id}\n${jdText}`;
+    if (key === lastAtsKeyRef.current) return;
+    const t = window.setTimeout(() => {
+      void onAiMatch({ silent: true });
+    }, 1400);
+    return () => window.clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- debounce on tab/jd/id only
+  }, [tab, jd, id]);
 
   const page = PAGE[settings.pageSize];
   /** Extra white band above/below each page frame (preview only). */
@@ -514,32 +674,16 @@ export default function BuilderClient() {
               </div>
 
               <div className="ctl-group space-y-2">
-                <p className="t-caption">AI</p>
+                <ContentCheckerPanel
+                  resumeId={id}
+                  data={data}
+                  jd={jd}
+                  busy={aiBusy}
+                  result={contentCheck}
+                  onCheck={onContentCheck}
+                  onFix={onContentFix}
+                />
                 <div className="flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    className="btn btn-ghost"
-                    disabled={aiBusy || !id}
-                    onClick={() => void onRewrite("summary")}
-                  >
-                    Rewrite Objective
-                  </button>
-                  <button
-                    type="button"
-                    className="btn btn-ghost"
-                    disabled={aiBusy || !id}
-                    onClick={() => void onRewrite("skills")}
-                  >
-                    Rewrite Skills
-                  </button>
-                  <button
-                    type="button"
-                    className="btn btn-ghost"
-                    disabled={aiBusy || !id}
-                    onClick={() => void onRewrite("exp")}
-                  >
-                    Rewrite Experience
-                  </button>
                   <button
                     type="button"
                     className="btn btn-ghost"
@@ -852,20 +996,13 @@ export default function BuilderClient() {
           {tab === "jd" ? (
             <div className="flex h-full flex-col gap-3 p-4">
               <div>
-                <p className="t-caption">Job description</p>
+                <p className="t-caption">Target job</p>
                 <p className="t-body-sm mt-1 text-[var(--text-secondary)]">
-                  Paste the posting. We extract keywords and score overlap.
+                  Paste the posting — skills extract instantly; ATS fit score
+                  comes from your LLM (Settings).
                 </p>
               </div>
-              <div className="flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  className="btn btn-primary"
-                  disabled={aiBusy || !id}
-                  onClick={() => void onAiMatch()}
-                >
-                  {aiBusy ? "Analyzing…" : "AI match analysis"}
-                </button>
+              <div className="flex flex-wrap items-center gap-2">
                 <button
                   type="button"
                   className="btn btn-ghost"
@@ -874,16 +1011,137 @@ export default function BuilderClient() {
                 >
                   Apply suggestions
                 </button>
+                {aiBusy ? (
+                  <span className="t-caption text-[var(--text-muted)]">
+                    Analyzing ATS fit…
+                  </span>
+                ) : null}
+                {!aiBusy && jd.trim().length >= 40 ? (
+                  <button
+                    type="button"
+                    className="btn btn-ghost"
+                    disabled={!id}
+                    onClick={() => {
+                      lastAtsKeyRef.current = "";
+                      void onAiMatch();
+                    }}
+                  >
+                    Re-check
+                  </button>
+                ) : null}
               </div>
               <div className="field flex-1">
                 <textarea
                   className="builder-resize-y min-h-[240px] w-full flex-1 font-mono text-[12px] leading-relaxed"
                   value={jd}
                   onChange={(e) => setJd(e.target.value)}
-                  placeholder="Paste the full job description here…"
+                  placeholder="Paste the full job posting here…"
                 />
               </div>
-              {aiNotes ? (
+              {isKeywordFallback && hasOfficial ? (
+                <div
+                  className="rounded-[var(--radius-md)] border px-3 py-2 t-body-sm"
+                  style={{
+                    borderColor: "var(--border-warning, #f5d0a9)",
+                    background: "var(--warning-bg, #fff7ed)",
+                    color: "var(--warning, #c2410c)",
+                  }}
+                >
+                  AI analysis unavailable — showing keyword coverage only. Add or
+                  fix your API key in Settings, then re-check.
+                </div>
+              ) : null}
+              <div
+                className={[
+                  "match-card",
+                  !jd.trim()
+                    ? "is-empty"
+                    : displayRate >= 50
+                      ? "is-good"
+                      : displayRate >= 30
+                        ? "is-ok"
+                        : "is-low",
+                ].join(" ")}
+              >
+                <div className="flex items-baseline justify-between gap-2">
+                  <span className="match-card-label">
+                    {hasOfficial && !isKeywordFallback
+                      ? "ATS fit score"
+                      : "Keyword coverage"}
+                  </span>
+                  <span className="match-card-rate">
+                    {jd.trim() ? `${displayRate}%` : "—"}
+                  </span>
+                </div>
+                <p className="match-card-meta">
+                  {!jd.trim()
+                    ? "Paste a job posting to score fit"
+                    : aiBusy && !hasOfficial
+                      ? `Scanning skills… ${coverageFound}/${Math.max(coverageTotal, 1)} found`
+                      : coverageTotal > 0
+                        ? `Keyword coverage ${coverageFound}/${coverageTotal} skills`
+                        : "No skill keywords extracted yet"}
+                </p>
+                {jd.trim() ? (
+                  <div className="match-card-bar" aria-hidden>
+                    <span style={{ width: `${Math.min(100, displayRate)}%` }} />
+                  </div>
+                ) : null}
+              </div>
+              {jd.trim() &&
+              (skeletonMatched.length > 0 || skeletonMissing.length > 0) ? (
+                <div className="flex flex-col gap-2">
+                  {skeletonMatched.length ? (
+                    <div>
+                      <p className="t-caption mb-2">
+                        Found on resume
+                        {aiBusy && !hasOfficial ? " (preview)" : ""}
+                      </p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {skeletonMatched.slice(0, 24).map((k) => (
+                          <span
+                            key={`m-${k}`}
+                            className="rounded-[var(--radius-sm)] bg-[var(--success-bg)] px-2 py-0.5 text-[11px] text-[var(--success)]"
+                          >
+                            {k}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
+                  {skeletonMissing.length ? (
+                    <div>
+                      <p className="t-caption mb-2">Skills gap</p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {skeletonMissing.slice(0, 24).map((k) => (
+                          <span
+                            key={`x-${k}`}
+                            className="rounded-[var(--radius-sm)] border border-[var(--border)] bg-white px-2 py-0.5 text-[11px] text-[var(--text-secondary)]"
+                          >
+                            {k}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+              {aiCategories.length && !isKeywordFallback ? (
+                <div className="grid grid-cols-2 gap-2">
+                  {aiCategories.map((c) => (
+                    <div
+                      key={c.id}
+                      className="rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--surface-0)] px-3 py-2"
+                    >
+                      <p className="t-caption">{c.label}</p>
+                      <p className="t-body-sm mt-0.5 font-medium text-[var(--text-primary)]">
+                        {c.score}%
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+              {aiNotes && !isKeywordFallback ? (
                 <div className="rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--surface-0)] p-3">
                   <p className="t-caption mb-1">AI notes</p>
                   <p className="t-body-sm whitespace-pre-wrap text-[var(--text-secondary)]">
@@ -891,9 +1149,94 @@ export default function BuilderClient() {
                   </p>
                 </div>
               ) : null}
+
+              <div className="ats-coach">
+                <div className="ats-coach-head">
+                  <span className="ats-coach-title">ATS coach</span>
+                  <span className="ats-coach-hint" title="Edits apply to the editor — Save to keep">
+                    Save to keep
+                  </span>
+                </div>
+                <div className="ats-coach-actions">
+                  <button
+                    type="button"
+                    className="ats-coach-chip"
+                    disabled={atsChatBusy || aiBusy || !id || jd.trim().length < 40}
+                    onClick={() =>
+                      void onAtsChatSend(
+                        "Raise my ATS fit score for this job. Weave in missing skills I can truthfully claim.",
+                      )
+                    }
+                  >
+                    Raise score
+                  </button>
+                  <button
+                    type="button"
+                    className="ats-coach-chip"
+                    disabled={
+                      atsChatBusy ||
+                      aiBusy ||
+                      !id ||
+                      jd.trim().length < 40 ||
+                      !skeletonMissing.length
+                    }
+                    onClick={() =>
+                      void onAtsChatSend(
+                        `Close the skills gap using these missing terms where truthful: ${skeletonMissing.slice(0, 10).join(", ")}.`,
+                      )
+                    }
+                  >
+                    Close gap
+                  </button>
+                </div>
+                {atsChat.length ? (
+                  <div className="ats-coach-log" aria-live="polite">
+                    {atsChat.map((m, i) => (
+                      <div
+                        key={`${m.role}-${i}`}
+                        className={`ats-coach-bubble is-${m.role}`}
+                      >
+                        {m.content}
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+                <div className="ats-coach-compose">
+                  <input
+                    type="text"
+                    className="ats-coach-input"
+                    value={atsChatInput}
+                    disabled={atsChatBusy || !id}
+                    placeholder="Ask coach…"
+                    aria-label="Message ATS coach"
+                    onChange={(e) => setAtsChatInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && !e.shiftKey) {
+                        e.preventDefault();
+                        void onAtsChatSend();
+                      }
+                    }}
+                  />
+                  <button
+                    type="button"
+                    className="ats-coach-send"
+                    disabled={
+                      atsChatBusy ||
+                      !id ||
+                      atsChatInput.trim().length < 2 ||
+                      jd.trim().length < 40
+                    }
+                    onClick={() => void onAtsChatSend()}
+                    aria-label={atsChatBusy ? "Sending" : "Send"}
+                  >
+                    {atsChatBusy ? "…" : "Send"}
+                  </button>
+                </div>
+              </div>
+
               {aiKeywords.length ? (
                 <div>
-                  <p className="t-caption mb-2">AI keywords</p>
+                  <p className="t-caption mb-2">JD skill keywords</p>
                   <div className="flex flex-wrap gap-1.5">
                     {aiKeywords.slice(0, 24).map((h) => (
                       <span
@@ -906,67 +1249,9 @@ export default function BuilderClient() {
                   </div>
                 </div>
               ) : null}
-              <div
-                className={[
-                  "match-card",
-                  !jd.trim()
-                    ? "is-empty"
-                    : match.rate >= 50
-                      ? "is-good"
-                      : match.rate >= 30
-                        ? "is-ok"
-                        : "is-low",
-                ].join(" ")}
-              >
-                <div className="flex items-baseline justify-between gap-2">
-                  <span className="match-card-label">Match rate</span>
-                  <span className="match-card-rate">
-                    {jd.trim() ? `${match.rate}%` : "—"}
-                  </span>
-                </div>
-                <p className="match-card-meta">
-                  {jd.trim()
-                    ? `${keywords.length} keywords · ${match.matches.length} found on resume`
-                    : "Paste a JD to score overlap"}
-                </p>
-                {jd.trim() ? (
-                  <div className="match-card-bar" aria-hidden>
-                    <span style={{ width: `${Math.min(100, match.rate)}%` }} />
-                  </div>
-                ) : null}
-              </div>
-              {match.missing.length ? (
-                <div>
-                  <p className="t-caption mb-2">Missing from resume</p>
-                  <div className="flex flex-wrap gap-1.5">
-                    {match.missing.slice(0, 24).map((k) => (
-                      <span
-                        key={k}
-                        className="rounded-[var(--radius-sm)] border border-[var(--border)] bg-white px-2 py-0.5 text-[11px] text-[var(--text-secondary)]"
-                      >
-                        {k}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              ) : null}
-              {match.matches.length ? (
-                <div>
-                  <p className="t-caption mb-2">Matched</p>
-                  <div className="flex flex-wrap gap-1.5">
-                    {match.matches.slice(0, 24).map((k) => (
-                      <span
-                        key={k}
-                        className="rounded-[var(--radius-sm)] bg-[var(--success-bg)] px-2 py-0.5 text-[11px] text-[var(--success)]"
-                      >
-                        {k}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              ) : null}
             </div>
           ) : null}
+
         </aside>
 
         <div
@@ -1175,11 +1460,11 @@ export default function BuilderClient() {
               <div className="mx-auto grid max-w-[1280px] gap-4 lg:grid-cols-2">
                 <div className="panel overflow-hidden p-0">
                   <div className="border-b border-[var(--border)] px-4 py-2.5">
-                    <h3 className="t-h3">Job description</h3>
+                    <h3 className="t-h3">Target job</h3>
                   </div>
                   <pre className="max-h-[70vh] overflow-auto whitespace-pre-wrap p-4 font-mono text-[12px] leading-relaxed text-[var(--text-secondary)]">
                     {jd.trim() ||
-                      "Paste a job description in the left panel to analyze keywords."}
+                      "Paste a job posting in the left panel to analyze fit."}
                   </pre>
                 </div>
                 <div className="panel overflow-hidden p-0">
@@ -1188,11 +1473,11 @@ export default function BuilderClient() {
                       <JdOverlapResume
                         data={data}
                         keywords={match.matches}
-                        rate={match.rate}
+                        rate={hasOfficial ? displayRate : match.rate}
                       />
                     ) : (
                       <p className="t-body-sm p-2 text-[var(--text-muted)]">
-                        Paste a job description to see formatted resume overlap.
+                        Paste a job posting to see resume keyword overlap.
                       </p>
                     )}
                   </div>

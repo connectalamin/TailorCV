@@ -13,6 +13,11 @@ CREATE TABLE IF NOT EXISTS resumes (
   status          TEXT NOT NULL DEFAULT 'ready',
   company         TEXT,
   role            TEXT,
+  location        TEXT,
+  employment_type TEXT,
+  salary          TEXT,
+  deadline        TEXT,
+  start_date      TEXT,
   updated_at      TEXT NOT NULL,
   source_file     TEXT,
   data_json       TEXT NOT NULL DEFAULT '{}',
@@ -31,6 +36,11 @@ CREATE TABLE IF NOT EXISTS jobs (
   keywords_json TEXT,
   company     TEXT,
   role        TEXT,
+  location    TEXT,
+  employment_type TEXT,
+  salary      TEXT,
+  deadline    TEXT,
+  start_date  TEXT,
   created_at  TEXT NOT NULL
 );
 
@@ -48,6 +58,11 @@ CREATE TABLE IF NOT EXISTS applications (
   id          TEXT PRIMARY KEY,
   company     TEXT NOT NULL,
   role        TEXT NOT NULL,
+  location    TEXT,
+  employment_type TEXT,
+  salary      TEXT,
+  deadline    TEXT,
+  start_date  TEXT,
   status      TEXT NOT NULL DEFAULT 'wish',
   notes       TEXT,
   match       INTEGER,
@@ -64,12 +79,32 @@ CREATE TABLE IF NOT EXISTS settings (
 """
 
 
+def _add_columns(conn: sqlite3.Connection, table: str, columns: dict[str, str]) -> None:
+    existing = {r[1] for r in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+    for name, decl in columns.items():
+        if name not in existing:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {decl}")
+
+
 def _migrate(conn: sqlite3.Connection) -> None:
-    cols = {r[1] for r in conn.execute("PRAGMA table_info(resumes)").fetchall()}
-    if "intensity" not in cols:
-        conn.execute("ALTER TABLE resumes ADD COLUMN intensity TEXT")
-    if "parent_id" not in cols:
-        conn.execute("ALTER TABLE resumes ADD COLUMN parent_id TEXT")
+    meta_cols = {
+        "location": "TEXT",
+        "employment_type": "TEXT",
+        "salary": "TEXT",
+        "deadline": "TEXT",
+        "start_date": "TEXT",
+    }
+    _add_columns(
+        conn,
+        "resumes",
+        {
+            "intensity": "TEXT",
+            "parent_id": "TEXT",
+            **meta_cols,
+        },
+    )
+    _add_columns(conn, "jobs", meta_cols)
+    _add_columns(conn, "applications", meta_cols)
 
 
 def init_db() -> None:

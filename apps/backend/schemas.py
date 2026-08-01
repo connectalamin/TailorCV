@@ -51,8 +51,15 @@ class ResumeListItem(BaseModel):
     status: str = "ready"
     company: Optional[str] = None
     role: Optional[str] = None
+    location: Optional[str] = None
+    employmentType: Optional[str] = None
+    salary: Optional[str] = None
+    deadline: Optional[str] = None
+    startDate: Optional[str] = None
     updatedAt: str = ""
     sourceFile: Optional[str] = None
+    # JD↔resume keyword overlap % when a job description is stored
+    match: Optional[int] = None
 
 
 class ResumeRecord(ResumeListItem):
@@ -74,6 +81,11 @@ class Application(BaseModel):
     id: str
     company: str
     role: str
+    location: Optional[str] = None
+    employmentType: Optional[str] = None
+    salary: Optional[str] = None
+    deadline: Optional[str] = None
+    startDate: Optional[str] = None
     status: str = "wish"
     notes: Optional[str] = None
     match: Optional[int] = None
@@ -86,6 +98,11 @@ class Application(BaseModel):
 class AppCreate(BaseModel):
     company: str
     role: str
+    location: Optional[str] = None
+    employmentType: Optional[str] = None
+    salary: Optional[str] = None
+    deadline: Optional[str] = None
+    startDate: Optional[str] = None
     notes: Optional[str] = None
     status: Optional[str] = None
     template: Optional[str] = None
@@ -98,6 +115,12 @@ class AppPatch(BaseModel):
     notes: Optional[str] = None
     company: Optional[str] = None
     role: Optional[str] = None
+    location: Optional[str] = None
+    employmentType: Optional[str] = None
+    salary: Optional[str] = None
+    deadline: Optional[str] = None
+    startDate: Optional[str] = None
+    match: Optional[int] = None
 
 
 class KeywordHit(BaseModel):
@@ -147,6 +170,27 @@ class LLMUpdate(BaseModel):
 class TestOut(BaseModel):
     ok: bool
     message: str
+
+
+class LlmOpStats(BaseModel):
+    calls: int = 0
+    successes: int = 0
+    failures: int = 0
+    tokens: int = 0
+    model: Optional[str] = None
+
+
+class LlmStatsOut(BaseModel):
+    since: str
+    calls: int = 0
+    successes: int = 0
+    failures: int = 0
+    promptTokens: int = 0
+    completionTokens: int = 0
+    totalTokens: int = 0
+    byOperation: dict[str, LlmOpStats] = Field(default_factory=dict)
+    byProvider: dict[str, LlmOpStats] = Field(default_factory=dict)
+    lastCallAt: Optional[str] = None
 
 
 class SystemStatus(BaseModel):
@@ -234,9 +278,81 @@ class AiAuxOut(BaseModel):
     outreach_message: str = ""
 
 
+class AiMatchCategory(BaseModel):
+    id: str
+    label: str
+    score: int = 0
+
+
 class AiMatchOut(BaseModel):
     keywords: list[KeywordHit] = Field(default_factory=list)
     notes: str = ""
+    score: int = 0
+    heuristicRate: int = 0
+    keywordFound: int = 0
+    keywordTotal: int = 0
+    matchedSkills: list[str] = Field(default_factory=list)
+    missingSkills: list[str] = Field(default_factory=list)
+    categories: list[AiMatchCategory] = Field(default_factory=list)
+    # "llm" = official AI verdict; "keyword" = local fallback only
+    source: Literal["llm", "keyword"] = "llm"
+
+
+class AiContentCheckReq(BaseModel):
+    data: Optional[ResumeData] = None
+    jd: Optional[str] = None
+
+
+class ContentIssue(BaseModel):
+    category: str
+    severity: Literal["info", "warn", "fail"] = "warn"
+    message: str
+    location: Optional[str] = None
+    suggestion: Optional[str] = None
+
+
+class ContentCategoryScore(BaseModel):
+    id: str
+    label: str
+    score: int = 0
+    issueCount: int = 0
+    status: Literal["ok", "warn", "fail"] = "ok"
+
+
+class AiContentCheckOut(BaseModel):
+    score: int = 0
+    issueCount: int = 0
+    categories: list[ContentCategoryScore] = Field(default_factory=list)
+    issues: list[ContentIssue] = Field(default_factory=list)
+
+
+class AiContentFixReq(BaseModel):
+    data: Optional[ResumeData] = None
+    jd: Optional[str] = None
+    issues: list[ContentIssue] = Field(default_factory=list)
+
+
+class AiContentFixOut(BaseModel):
+    data: ResumeData
+
+
+class AiAtsChatMessage(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str
+
+
+class AiAtsChatReq(BaseModel):
+    message: str = ""
+    jd: Optional[str] = None
+    data: Optional[ResumeData] = None
+    missingSkills: list[str] = Field(default_factory=list)
+    history: list[AiAtsChatMessage] = Field(default_factory=list)
+
+
+class AiAtsChatOut(BaseModel):
+    reply: str = ""
+    applied: bool = False
+    data: Optional[ResumeData] = None
 
 
 class CompileReq(BaseModel):
@@ -246,6 +362,8 @@ class CompileReq(BaseModel):
     marginIn: Optional[float] = None
     filename: Optional[str] = None
     projectsTwoColumn: Optional[bool] = None
+    # When true (default), force single-column skills/projects/pairs for ATS parsers.
+    atsSafe: Optional[bool] = None
 
 
 class CompileStatus(BaseModel):

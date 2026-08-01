@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { ResumePreview } from "@/components/resume/resume-preview";
 import {
@@ -14,6 +14,10 @@ import {
 } from "@/lib/api";
 import { DEFAULT_TEMPLATE_SETTINGS } from "@/lib/mock/data";
 import type { ImproveResult, TailorIntensity } from "@/lib/types/resume";
+import { TAILOR_WAIT_FACTS } from "@/lib/wait-facts";
+
+const WAIT_FACT_TOAST_ID = "tailor-wait-fact";
+const WAIT_FACT_ROTATE_MS = 4200;
 
 const INTENSITIES: {
   id: TailorIntensity;
@@ -45,9 +49,50 @@ export default function TailorPage() {
   const [intensity, setIntensity] = useState<TailorIntensity>("balanced");
   const [busy, setBusy] = useState(false);
   const [preview, setPreview] = useState<ImproveResult | null>(null);
+  const waitFactTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+  const waitFactIndex = useRef(0);
 
   const settings = useMemo(() => structuredClone(DEFAULT_TEMPLATE_SETTINGS), []);
   const chars = jd.trim().length;
+
+  function stopWaitFacts() {
+    if (waitFactTimer.current) {
+      clearInterval(waitFactTimer.current);
+      waitFactTimer.current = null;
+    }
+    toast.dismiss(WAIT_FACT_TOAST_ID);
+  }
+
+  function showWaitFact(index: number) {
+    toast.message(TAILOR_WAIT_FACTS[index], {
+      id: WAIT_FACT_TOAST_ID,
+      position: "top-center",
+      duration: Infinity,
+      dismissible: false,
+      className: "tailor-wait-toast",
+    });
+  }
+
+  function startWaitFacts() {
+    stopWaitFacts();
+    waitFactIndex.current = Math.floor(Math.random() * TAILOR_WAIT_FACTS.length);
+    showWaitFact(waitFactIndex.current);
+    waitFactTimer.current = setInterval(() => {
+      waitFactIndex.current =
+        (waitFactIndex.current + 1) % TAILOR_WAIT_FACTS.length;
+      showWaitFact(waitFactIndex.current);
+    }, WAIT_FACT_ROTATE_MS);
+  }
+
+  useEffect(() => {
+    return () => {
+      if (waitFactTimer.current) {
+        clearInterval(waitFactTimer.current);
+        waitFactTimer.current = null;
+      }
+      toast.dismiss(WAIT_FACT_TOAST_ID);
+    };
+  }, []);
 
   async function onPreview() {
     if (jd.trim().length < 50) {
@@ -62,6 +107,7 @@ export default function TailorPage() {
     }
     setBusy(true);
     setPreview(null);
+    startWaitFacts();
     try {
       const { job_id } = await uploadJobDescriptions([jd], master);
       const res = await improveResume(master, job_id, jd, intensity);
@@ -76,6 +122,7 @@ export default function TailorPage() {
             : undefined,
       });
     } finally {
+      stopWaitFacts();
       setBusy(false);
     }
   }

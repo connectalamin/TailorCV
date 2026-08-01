@@ -19,12 +19,17 @@ export {
   aiGenerateCover,
   aiGenerateOutreach,
   aiMatchJd,
+  aiContentCheck,
+  aiContentFix,
+  aiAtsChat,
 } from "@/lib/api/resume";
 export {
   fetchLlmConfig,
   updateLlmConfig,
   deleteLlmEntry,
   testLlmConnection,
+  fetchLlmStats,
+  resetLlmStats,
   fetchSystemStatus,
   listApplications,
   createApplication,

@@ -18,20 +18,21 @@ def create_job(body: schemas.JobsReq, db: Connection = Depends(get_conn)):
     if not descriptions:
         raise HTTPException(400, "At least one job description is required")
     jd = descriptions[0]
-    hits = improver.extract_job_keywords(jd, storage.get_llm(db))
-    company = None
-    role = None
-    # Light heuristic: first non-empty line often has role
-    first = next((ln.strip() for ln in jd.splitlines() if ln.strip()), "")
-    if first and len(first) < 120:
-        role = first[:120]
+    cfg = storage.get_llm(db)
+    hits = improver.extract_job_keywords(jd, cfg)
+    meta = improver.extract_job_metadata(jd, cfg)
     rec = storage.create_job(
         db,
         description=jd,
         resume_id=body.resume_id or None,
         keywords=hits,
-        company=company,
-        role=role,
+        company=meta.get("company"),
+        role=meta.get("role"),
+        location=meta.get("location"),
+        employment_type=meta.get("type"),
+        salary=meta.get("salary"),
+        deadline=meta.get("deadline"),
+        start_date=meta.get("startDate"),
     )
     return schemas.JobsOut(job_id=rec["job_id"])
 

@@ -1,7 +1,7 @@
-\documentclass[10.5pt, letterpaper]{article}
+\documentclass[10.5pt, a4paper]{article}
 
 % ATS-safe: single column, no icons, no color blocks
-\usepackage[margin=0.75in]{geometry}
+\usepackage[margin=0.6in]{geometry}
 \usepackage[T1]{fontenc}
 \usepackage{lmodern}
 \usepackage{enumitem}
@@ -9,9 +9,11 @@
 \usepackage{hyperref}
 
 \pagestyle{empty}
-\setlist[itemize]{leftmargin=*, itemsep=1pt, topsep=2pt, parsep=0pt}
-\titleformat{\section}{\bfseries\large}{}{0em}{}[\titlerule]
-\titlespacing{\section}{0pt}{10pt}{6pt}
+\setlength{\parskip}{0pt}
+\setlength{\parindent}{0pt}
+\setlist[itemize]{leftmargin=*, nosep, itemsep=1pt, topsep=1pt, parsep=0pt}
+\titleformat{\section}{\bfseries\large}{}{0em}{}[\vspace{-2pt}\titlerule]
+\titlespacing*{\section}{0pt}{8pt}{4pt}
 
 \hypersetup{colorlinks=true, linkcolor=black, urlcolor=black}
 

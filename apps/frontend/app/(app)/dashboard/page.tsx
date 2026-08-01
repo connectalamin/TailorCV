@@ -11,7 +11,11 @@ import {
   listApplications,
   uploadMasterResume,
 } from "@/lib/api";
-import type { Application, ResumeListItem } from "@/lib/types/resume";
+import type {
+  Application,
+  ApplicationStatus,
+  ResumeListItem,
+} from "@/lib/types/resume";
 
 type Activity = {
   id: string;
@@ -22,7 +26,22 @@ type Activity = {
   viewHref: string;
   editHref: string;
   status?: string;
+  /** Linked / underlying resume label */
+  resumeLabel?: string;
+  /** ATS / JD match percent when known */
+  atsMatch?: number;
 };
+
+const PIPELINE: {
+  id: ApplicationStatus;
+  name: string;
+  color: string;
+}[] = [
+  { id: "wish", name: "Wishlist", color: "#9C9C9C" },
+  { id: "applied", name: "Applied", color: "#6366F1" },
+  { id: "interview", name: "Interview", color: "#F59E0B" },
+  { id: "offer", name: "Offer", color: "#10B981" },
+];
 
 function timeAgo(iso?: string) {
   if (!iso) return "—";
@@ -37,6 +56,65 @@ function timeAgo(iso?: string) {
   const days = Math.floor(h / 24);
   if (days < 7) return `${days}d ago`;
   return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
+
+function formatWhen(when: string) {
+  if (when.includes("T") || when.includes("-")) {
+    const ago = timeAgo(when);
+    return ago === "—" ? when || "—" : ago;
+  }
+  return when || "—";
+}
+
+function statusPillClass(status?: string) {
+  switch (status) {
+    case "offer":
+    case "Ready":
+    case "ready":
+      return "pill pill-success";
+    case "interview":
+      return "pill pill-warning";
+    case "applied":
+    case "Wishlist":
+    case "wish":
+      return "pill pill-accent";
+    default:
+      return "pill pill-accent";
+  }
+}
+
+function activityStatusLabel(kind: Activity["kind"], status?: string) {
+  if (kind === "resume") {
+    if (!status) return "Resume";
+    if (status === "ready" || status === "Ready") return "Resume · Ready";
+    return `Resume · ${status}`;
+  }
+  switch (status) {
+    case "wish":
+      return "App · Wishlist";
+    case "applied":
+      return "App · Applied";
+    case "interview":
+      return "App · Interview";
+    case "offer":
+      return "App · Offer";
+    default:
+      return status ? `App · ${status}` : "Application";
+  }
+}
+
+function resumeDisplayName(r: ResumeListItem | undefined): string {
+  if (!r) return "";
+  if (r.isMaster) return r.sourceFile || r.title || "Master resume";
+  if (r.company && r.role) return `${r.company} · ${r.role}`;
+  if (r.company) return r.company;
+  return r.title || r.sourceFile || "Resume";
+}
+
+function atsPillClass(pct: number) {
+  if (pct >= 80) return "pill pill-success";
+  if (pct >= 55) return "pill pill-warning";
+  return "pill pill-accent";
 }
 
 function IconShow() {
@@ -122,28 +200,70 @@ export default function DashboardPage() {
 
   const master = resumes.find((r) => r.isMaster);
   const tailored = resumes.filter((r) => !r.isMaster);
-  // Do not read localStorage during render — it mismatches SSR and triggers React #418.
   const hasMaster = Boolean(master);
+  const resumeById = useMemo(() => {
+    const m = new Map<string, ResumeListItem>();
+    for (const r of resumes) m.set(r.id, r);
+    return m;
+  }, [resumes]);
+  const matchByResumeId = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const r of resumes) {
+      if (typeof r.match === "number") m.set(r.id, r.match);
+    }
+    for (const a of apps) {
+      if (!a.resumeId || typeof a.match !== "number") continue;
+      const prev = m.get(a.resumeId);
+      if (prev == null || a.match > prev) m.set(a.resumeId, a.match);
+    }
+    return m;
+  }, [apps, resumes]);
+  const masterAts =
+    master && typeof matchByResumeId.get(master.id) === "number"
+      ? matchByResumeId.get(master.id)
+      : typeof master?.match === "number"
+        ? master.match
+        : undefined;
   const interviews = apps.filter((a) => a.status === "interview").length;
+  const offers = apps.filter((a) => a.status === "offer").length;
   const avgMatch = apps.length
     ? Math.round(apps.reduce((s, a) => s + (a.match ?? 0), 0) / apps.length)
     : 0;
 
+  const pipelineCounts = useMemo(() => {
+    const counts: Record<ApplicationStatus, number> = {
+      wish: 0,
+      applied: 0,
+      interview: 0,
+      offer: 0,
+    };
+    for (const a of apps) counts[a.status] += 1;
+    return counts;
+  }, [apps]);
+
+  const pipelineMax = Math.max(1, ...Object.values(pipelineCounts));
+
   const activity = useMemo(() => {
     const rows: Activity[] = [];
     for (const r of tailored) {
+      const ats = matchByResumeId.get(r.id);
       rows.push({
         id: `r-${r.id}`,
         entityId: r.id,
-        label: `Tailored resume · ${r.title}`,
+        label: r.company
+          ? `${r.company} · ${r.role || r.title}`
+          : `Tailored · ${r.title}`,
         when: r.updatedAt,
         kind: "resume",
         viewHref: `/resumes/${r.id}`,
         editHref: `/builder?id=${r.id}`,
         status: r.status === "ready" ? "Ready" : r.status,
+        resumeLabel: resumeDisplayName(r),
+        atsMatch: ats,
       });
     }
     for (const a of apps) {
+      const linked = a.resumeId ? resumeById.get(a.resumeId) : undefined;
       rows.push({
         id: `a-${a.id}`,
         entityId: a.id,
@@ -153,6 +273,9 @@ export default function DashboardPage() {
         viewHref: "/tracker",
         editHref: "/tracker",
         status: a.status,
+        resumeLabel:
+          resumeDisplayName(linked) ||
+          (a.resumeId ? "Linked resume" : "No resume"),
       });
     }
     return rows
@@ -161,8 +284,17 @@ export default function DashboardPage() {
         const tb = Date.parse(b.when) || 0;
         return tb - ta;
       })
-      .slice(0, 8);
-  }, [apps, tailored]);
+      .slice(0, 10);
+  }, [apps, tailored, resumeById, matchByResumeId]);
+
+  const topMatches = useMemo(
+    () =>
+      [...apps]
+        .filter((a) => typeof a.match === "number")
+        .sort((a, b) => (b.match ?? 0) - (a.match ?? 0))
+        .slice(0, 4),
+    [apps],
+  );
 
   async function confirmDeleteRow() {
     const row = pendingDelete;
@@ -181,6 +313,11 @@ export default function DashboardPage() {
     }
   }
 
+  function openTailor() {
+    if (hasMaster) router.push("/tailor");
+    else setUploadOpen(true);
+  }
+
   return (
     <div className="page">
       {error ? (
@@ -196,203 +333,434 @@ export default function DashboardPage() {
         </p>
       ) : null}
 
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <p className="t-caption text-[var(--text-muted)]" style={{ letterSpacing: "0.08em" }}>
+            OVERVIEW
+          </p>
+          <p className="t-body mt-1 text-[var(--text-secondary)]">
+            {hasMaster
+              ? `${tailored.length} tailored resume${tailored.length === 1 ? "" : "s"} · ${apps.length} application${apps.length === 1 ? "" : "s"} in flight`
+              : "Upload a master resume to start tailoring for roles."}
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          {hasMaster && master ? (
+            <div className="dash-master-chip">
+              <span className="dash-master-chip-name" title={resumeDisplayName(master)}>
+                {resumeDisplayName(master)}
+              </span>
+              {typeof masterAts === "number" ? (
+                <span className={atsPillClass(masterAts)}>ATS · {masterAts}%</span>
+              ) : (
+                <span className="pill">Master</span>
+              )}
+            </div>
+          ) : null}
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={() => setUploadOpen(true)}
+          >
+            {hasMaster ? "Replace master" : "Upload master"}
+          </button>
+          <button type="button" className="btn btn-primary" onClick={openTailor}>
+            Tailor from JD
+          </button>
+        </div>
+      </div>
+
+      <div className="kpi-band dash-rise">
         {[
-          ["Applications sent", loading ? "—" : apps.length],
-          ["Resumes tailored", loading ? "—" : tailored.length],
-          ["Interviews", loading ? "—" : interviews],
-          ["Avg match", loading ? "—" : `${avgMatch}%`],
-        ].map(([label, value]) => (
-          <div key={label as string} className="metric-card">
-            <p className="t-caption text-[var(--text-secondary)]">{label}</p>
-            <p
-              className="mt-2 text-[24px] font-medium tracking-tight"
-              style={{ color: "var(--text-primary)", lineHeight: 1.2 }}
-            >
-              {value}
-            </p>
+          {
+            label: "Applications",
+            value: loading ? "—" : String(apps.length),
+            sub: loading ? null : `${pipelineCounts.applied} applied`,
+            bar: apps.length ? Math.min(100, apps.length * 12) : 0,
+            color: "var(--accent)",
+          },
+          {
+            label: "Resumes tailored",
+            value: loading ? "—" : String(tailored.length),
+            sub: hasMaster ? "Master ready" : "No master yet",
+            bar: tailored.length ? Math.min(100, tailored.length * 18) : 0,
+            color: "var(--accent)",
+          },
+          {
+            label: "Interviews",
+            value: loading ? "—" : String(interviews),
+            sub: offers ? `${offers} offer${offers === 1 ? "" : "s"}` : "None scheduled",
+            bar: apps.length ? Math.round((interviews / Math.max(apps.length, 1)) * 100) : 0,
+            color: "var(--warning)",
+          },
+          {
+            label: "Avg match",
+            value: loading ? "—" : `${avgMatch}%`,
+            sub: apps.length ? "Across tracked roles" : "No matches yet",
+            bar: avgMatch,
+            color: "var(--success)",
+          },
+        ].map((kpi) => (
+          <div key={kpi.label} className="kpi-cell">
+            <div className="kpi-label">{kpi.label}</div>
+            <div className="kpi-value">{kpi.value}</div>
+            <div className="kpi-sub">
+              <div className="kpi-bar">
+                <i style={{ width: `${kpi.bar}%`, background: kpi.color }} />
+              </div>
+              <span>{kpi.sub}</span>
+            </div>
           </div>
         ))}
       </div>
 
-      <div className="mt-4 grid gap-3 lg:grid-cols-2">
-        <div className="action-card">
-          <div className="icon-box">
-            <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.7">
-              <path d="M7 3h7l4 4v14a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z" />
-              <path d="M14 3v5h5" />
-            </svg>
-          </div>
-          <div className="action-card-body">
-            <h2 className="t-h3 text-[var(--text-primary)]">
-              {hasMaster ? "Master resume" : "Initialize master resume"}
-            </h2>
-            <p className="t-body-sm text-[var(--text-secondary)]">
-              {hasMaster
-                ? `${master?.sourceFile || "Uploaded"} · parsed ${timeAgo(master?.updatedAt)}`
-                : "Set up your base resume once, reuse it everywhere."}
-            </p>
-            <div className="action-card-actions">
-              {hasMaster && master ? (
-                <Link href={`/resumes/${master.id}`} className="no-underline">
-                  <button type="button" className="btn btn-secondary">
-                    Open master
-                  </button>
-                </Link>
-              ) : null}
-              <button
-                type="button"
-                className="btn btn-secondary"
-                onClick={() => setUploadOpen(true)}
-              >
-                {hasMaster ? "Replace upload" : "Upload resume"}
-              </button>
-            </div>
-          </div>
-        </div>
-
-        <div className="action-card featured">
-          <div className="icon-box accent">
-            <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.7">
-              <path d="M12 5v14M5 12h14" />
-            </svg>
-          </div>
-          <div className="action-card-body">
-            <h2 className="t-h3 text-[var(--text-primary)]">Create resume</h2>
-            <p className="t-body-sm text-[var(--text-secondary)]">
-              Tailor a resume from a job description.
-            </p>
-            <div className="action-card-actions">
+      <div className="mt-4 grid gap-4 lg:grid-cols-3">
+        <div className="flex flex-col gap-4 lg:col-span-2">
+          <section className="panel p-4">
+            <div className="mb-3 flex items-baseline justify-between gap-3">
+              <h2 className="t-h3 text-[var(--text-primary)]">Application pipeline</h2>
               <Link
-                href={hasMaster ? "/tailor" : "#"}
-                className="no-underline"
-                onClick={(e) => {
-                  if (!hasMaster) {
-                    e.preventDefault();
-                    setUploadOpen(true);
-                  }
-                }}
+                href="/tracker"
+                className="t-body-sm text-[var(--accent)] no-underline hover:underline"
               >
-                <button type="button" className="btn btn-secondary">
-                  Tailor from JD
-                </button>
+                Open tracker
               </Link>
             </div>
-          </div>
-        </div>
-      </div>
-
-      <section className="mt-6">
-        <div className="mb-2 flex items-baseline justify-between gap-3">
-          <h2 className="t-h2 text-[var(--text-primary)]">Recent activity</h2>
-          <Link
-            href="/tracker"
-            className="t-body-sm text-[var(--accent)] no-underline hover:underline"
-          >
-            View applications
-          </Link>
-        </div>
-
-        <div className="panel px-4">
-          {loading ? (
-            <div className="py-8 text-center t-body-sm text-[var(--text-muted)]">
-              Loading…
-            </div>
-          ) : activity.length === 0 ? (
-            <div className="flex flex-col items-center px-4 py-10 text-center">
-              <div className="icon-box mb-3">
-                <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.7">
-                  <path d="M4 6h16M4 12h10M4 18h14" />
-                </svg>
+            {loading ? (
+              <p className="t-body-sm py-6 text-center text-[var(--text-muted)]">Loading…</p>
+            ) : (
+              <div className="flex flex-col gap-3">
+                {PIPELINE.map((stage) => {
+                  const n = pipelineCounts[stage.id];
+                  const pct = Math.round((n / pipelineMax) * 100);
+                  return (
+                    <div key={stage.id} className="fun-row">
+                      <div className="fun-name">
+                        <span className="fun-dot" style={{ background: stage.color }} />
+                        {stage.name}
+                      </div>
+                      <div className="fun-track">
+                        <div
+                          className="fun-fill"
+                          style={{
+                            width: `${n ? Math.max(pct, 8) : 0}%`,
+                            background: stage.color,
+                          }}
+                        />
+                      </div>
+                      <div className="fun-n">{n}</div>
+                    </div>
+                  );
+                })}
+                {apps.length === 0 ? (
+                  <p className="t-body-sm mt-1 text-[var(--text-muted)]">
+                    Tailor a resume or add roles in Applications to fill the pipeline.
+                  </p>
+                ) : null}
               </div>
-              <p className="t-body text-[var(--text-secondary)]">
-                No activity yet. Upload a master resume or tailor one for a role.
-              </p>
-              <button
-                type="button"
-                className="btn btn-secondary mt-4"
-                onClick={() => setUploadOpen(true)}
+            )}
+          </section>
+
+          <section className="panel px-4">
+            <div className="mb-1 flex items-baseline justify-between gap-3 pt-4">
+              <h2 className="t-h3 text-[var(--text-primary)]">Recent activity</h2>
+              <Link
+                href="/tracker"
+                className="t-body-sm text-[var(--accent)] no-underline hover:underline"
               >
-                Upload master resume
-              </button>
+                View all
+              </Link>
             </div>
-          ) : (
-            activity.map((row) => (
-              <div key={row.id} className="list-row">
-                <span className="text-[var(--text-secondary)]">
-                  {row.kind === "resume" ? (
-                    <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.7">
-                      <path d="M7 3h7l4 4v14H7V3z" />
-                    </svg>
-                  ) : (
-                    <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.7">
-                      <rect x="4" y="7" width="16" height="13" rx="2" />
-                    </svg>
-                  )}
-                </span>
+            {loading ? (
+              <div className="py-8 text-center t-body-sm text-[var(--text-muted)]">
+                Loading…
+              </div>
+            ) : activity.length === 0 ? (
+              <div className="flex flex-col items-center px-4 py-10 text-center">
+                <div className="icon-box mb-3">
+                  <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.7">
+                    <path d="M4 6h16M4 12h10M4 18h14" />
+                  </svg>
+                </div>
+                <p className="t-body text-[var(--text-secondary)]">
+                  No activity yet. Upload a master resume or tailor one for a role.
+                </p>
                 <button
                   type="button"
-                  className="t-body min-w-0 flex-1 truncate text-left text-[var(--text-primary)]"
-                  style={{
-                    background: "none",
-                    border: "none",
-                    padding: 0,
-                    cursor: "pointer",
-                    font: "inherit",
-                  }}
-                  onClick={() => router.push(row.viewHref)}
+                  className="btn btn-secondary mt-4"
+                  onClick={() => setUploadOpen(true)}
                 >
-                  {row.label}
+                  Upload master resume
                 </button>
-                {row.status ? (
-                  <span className="pill pill-accent hidden sm:inline-flex">
-                    {row.status}
+              </div>
+            ) : (
+              activity.map((row) => (
+                <div key={row.id} className="list-row act-row">
+                  <span className="text-[var(--text-secondary)]">
+                    {row.kind === "resume" ? (
+                      <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.7">
+                        <path d="M7 3h7l4 4v14H7V3z" />
+                      </svg>
+                    ) : (
+                      <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.7">
+                        <rect x="4" y="7" width="16" height="13" rx="2" />
+                      </svg>
+                    )}
                   </span>
-                ) : null}
-                <div className="row-actions">
                   <button
                     type="button"
-                    className="btn btn-ghost btn-icon"
-                    title="Show"
-                    aria-label="Show"
+                    className="t-body min-w-0 flex-1 truncate text-left text-[var(--text-primary)]"
+                    style={{
+                      background: "none",
+                      border: "none",
+                      padding: 0,
+                      cursor: "pointer",
+                      font: "inherit",
+                    }}
                     onClick={() => router.push(row.viewHref)}
                   >
-                    <IconShow />
+                    <span className="block truncate">{row.label}</span>
+                    {row.kind === "application" && row.resumeLabel ? (
+                      <span className="t-body-sm block truncate text-[var(--text-muted)]">
+                        Resume · {row.resumeLabel}
+                      </span>
+                    ) : null}
                   </button>
-                  <button
-                    type="button"
-                    className="btn btn-ghost btn-icon"
-                    title="Edit"
-                    aria-label="Edit"
-                    onClick={() => router.push(row.editHref)}
-                  >
-                    <IconEdit />
-                  </button>
-                  <button
-                    type="button"
-                    className="btn btn-ghost btn-icon row-action-danger"
-                    title="Delete"
-                    aria-label="Delete"
-                    disabled={busyId === row.id}
-                    onClick={() => setPendingDelete(row)}
-                  >
-                    <IconDelete />
-                  </button>
+                  <div className="act-tags">
+                    {row.kind === "resume" && typeof row.atsMatch === "number" ? (
+                      <span className={`${atsPillClass(row.atsMatch)} shrink-0`}>
+                        ATS · {row.atsMatch}%
+                      </span>
+                    ) : null}
+                    {row.status || row.kind ? (
+                      <span className={`${statusPillClass(row.status)} shrink-0`}>
+                        {activityStatusLabel(row.kind, row.status)}
+                      </span>
+                    ) : null}
+                  </div>
+                  <div className="row-actions act-actions">
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-icon"
+                      title="Show"
+                      aria-label="Show"
+                      onClick={() => router.push(row.viewHref)}
+                    >
+                      <IconShow />
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-icon"
+                      title="Edit"
+                      aria-label="Edit"
+                      onClick={() => router.push(row.editHref)}
+                    >
+                      <IconEdit />
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-icon row-action-danger"
+                      title="Delete"
+                      aria-label="Delete"
+                      disabled={busyId === row.id}
+                      onClick={() => setPendingDelete(row)}
+                    >
+                      <IconDelete />
+                    </button>
+                  </div>
+                  <span className="t-body-sm shrink-0 text-[var(--text-muted)]">
+                    {formatWhen(row.when)}
+                  </span>
                 </div>
-                <span className="t-body-sm shrink-0 text-[var(--text-muted)]">
-                  {timeAgo(
-                    row.when.includes("T") || row.when.includes("-")
-                      ? row.when
-                      : undefined,
-                  ) === "—"
-                    ? row.when || "—"
-                    : timeAgo(row.when)}
-                </span>
-              </div>
-            ))
-          )}
+              ))
+            )}
+          </section>
         </div>
-      </section>
+
+        <div className="flex flex-col gap-4">
+          <section className="panel p-3">
+            <h2 className="t-h3 mb-2 px-1 text-[var(--text-primary)]">Quick actions</h2>
+            <button
+              type="button"
+              className="qa-row accent w-full text-left"
+              onClick={openTailor}
+            >
+              <span className="icon-box qa-ico accent">
+                <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.7">
+                  <path d="M12 5v14M5 12h14" />
+                </svg>
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="t-body block font-medium text-[var(--text-primary)]">
+                  Tailor from JD
+                </span>
+                <span className="t-body-sm text-[var(--text-secondary)]">
+                  Paste a posting, generate a match
+                </span>
+              </span>
+              <span className="qa-chev">→</span>
+            </button>
+            <Link href="/tracker" className="qa-row">
+              <span className="icon-box qa-ico">
+                <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.7">
+                  <path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                  <rect x="4" y="7" width="16" height="13" rx="2" />
+                </svg>
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="t-body block font-medium text-[var(--text-primary)]">
+                  Track applications
+                </span>
+                <span className="t-body-sm text-[var(--text-secondary)]">
+                  Kanban across wishlist → offer
+                </span>
+              </span>
+              <span className="qa-chev">→</span>
+            </Link>
+            {hasMaster && master ? (
+              <Link href={`/resumes/${master.id}`} className="qa-row">
+                <span className="icon-box qa-ico">
+                  <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.7">
+                    <path d="M7 3h7l4 4v14a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z" />
+                    <path d="M14 3v5h5" />
+                  </svg>
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="t-body block font-medium text-[var(--text-primary)]">
+                    Open master
+                  </span>
+                  <span className="t-body-sm truncate text-[var(--text-secondary)]">
+                    {master.sourceFile || "Master resume"} · {timeAgo(master.updatedAt)}
+                  </span>
+                </span>
+                <span className="qa-chev">→</span>
+              </Link>
+            ) : (
+              <button
+                type="button"
+                className="qa-row w-full text-left"
+                onClick={() => setUploadOpen(true)}
+              >
+                <span className="icon-box qa-ico">
+                  <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.7">
+                    <path d="M12 16V7M8.5 10.5 12 7l3.5 3.5" />
+                    <path d="M5 18h14" />
+                  </svg>
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="t-body block font-medium text-[var(--text-primary)]">
+                    Upload master resume
+                  </span>
+                  <span className="t-body-sm text-[var(--text-secondary)]">
+                    PDF, DOCX, TEX, or TXT
+                  </span>
+                </span>
+                <span className="qa-chev">→</span>
+              </button>
+            )}
+          </section>
+
+          <section className="panel p-4">
+            <div className="mb-3 flex items-baseline justify-between gap-2">
+              <h2 className="t-h3 text-[var(--text-primary)]">Tailored resumes</h2>
+              <span className="t-caption text-[var(--text-muted)]">
+                {loading ? "—" : tailored.length}
+              </span>
+            </div>
+            {loading ? (
+              <p className="t-body-sm text-[var(--text-muted)]">Loading…</p>
+            ) : tailored.length === 0 ? (
+              <p className="t-body-sm text-[var(--text-muted)]">
+                No tailored versions yet. Start from a job description.
+              </p>
+            ) : (
+              <ul className="flex flex-col gap-2">
+                {tailored.slice(0, 5).map((r) => (
+                  <li key={r.id}>
+                    <Link
+                      href={`/resumes/${r.id}`}
+                      className="match-card block no-underline transition hover:border-[var(--border-strong)]"
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="t-body truncate font-medium text-[var(--text-primary)]">
+                            {r.company || r.title}
+                          </p>
+                          <p className="t-body-sm truncate text-[var(--text-secondary)]">
+                            {r.role || "Tailored resume"}
+                          </p>
+                        </div>
+                        <div className="flex shrink-0 flex-col items-end gap-1">
+                          {typeof r.match === "number" ||
+                          typeof matchByResumeId.get(r.id) === "number" ? (
+                            <span
+                              className={atsPillClass(
+                                (typeof r.match === "number"
+                                  ? r.match
+                                  : matchByResumeId.get(r.id)) as number,
+                              )}
+                            >
+                              ATS ·{" "}
+                              {typeof r.match === "number"
+                                ? r.match
+                                : matchByResumeId.get(r.id)}
+                              %
+                            </span>
+                          ) : null}
+                          <span
+                            className={statusPillClass(
+                              r.status === "ready" ? "Ready" : r.status,
+                            )}
+                          >
+                            {r.status === "ready" ? "Ready" : r.status}
+                          </span>
+                        </div>
+                      </div>
+                      <p className="t-caption mt-2 text-[var(--text-muted)]">
+                        Updated {timeAgo(r.updatedAt)}
+                      </p>
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            )}
+            {tailored.length > 5 ? (
+              <p className="t-body-sm mt-3 text-[var(--text-muted)]">
+                +{tailored.length - 5} more in recent activity
+              </p>
+            ) : null}
+          </section>
+
+          {topMatches.length > 0 ? (
+            <section className="panel p-4">
+              <h2 className="t-h3 mb-3 text-[var(--text-primary)]">Top matches</h2>
+              <ul className="flex flex-col gap-2.5">
+                {topMatches.map((a) => (
+                  <li key={a.id} className="flex items-center gap-3">
+                    <div className="min-w-0 flex-1">
+                      <p className="t-body truncate text-[var(--text-primary)]">{a.company}</p>
+                      <p className="t-body-sm truncate text-[var(--text-muted)]">{a.role}</p>
+                    </div>
+                    <span
+                      className="t-body shrink-0 font-medium tabular-nums"
+                      style={{
+                        color:
+                          (a.match ?? 0) >= 88
+                            ? "var(--success)"
+                            : (a.match ?? 0) >= 80
+                              ? "var(--accent)"
+                              : "var(--text-secondary)",
+                      }}
+                    >
+                      {a.match}%
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          ) : null}
+        </div>
+      </div>
 
       <ConfirmModal
         open={!!pendingDelete}

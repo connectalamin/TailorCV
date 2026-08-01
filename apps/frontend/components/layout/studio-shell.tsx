@@ -84,14 +84,16 @@ export function StudioShell({ children }: { children: ReactNode }) {
       <aside className={["app-sidebar", collapsed ? "collapsed" : ""].join(" ")}>
         <Link href="/dashboard" className="brand flex items-center gap-2.5 px-4 pt-5 pb-5 no-underline">
           <span
-            className="grid h-8 w-8 place-items-center rounded-[var(--radius-sm)]"
-            style={{ background: "var(--deep)", color: "#fff" }}
+            className="grid h-8 w-8 place-items-center rounded-[var(--radius-md)]"
+            style={{ background: "var(--accent)", color: "#fff" }}
           >
             <svg viewBox="0 0 24 24" className="h-4 w-4" fill="currentColor">
               <path d="M6 3h9l3 3v15a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1zm8 1.5V8h3.5" />
             </svg>
           </span>
-          <span className="brand-text t-h3 text-[var(--text-primary)]">TailorCV</span>
+          <span className="brand-text t-h3 text-[var(--text-primary)]">
+            Tailor<span style={{ color: "var(--brand-mark)" }}>CV</span>
+          </span>
         </Link>
 
         <nav className="flex flex-1 flex-col gap-1 px-3">
