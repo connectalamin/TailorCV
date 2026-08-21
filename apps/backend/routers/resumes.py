@@ -125,8 +125,30 @@ def improve_preview(
     job_salary = (job or {}).get("salary") or None
     job_deadline = (job or {}).get("deadline") or None
     job_start_date = (job or {}).get("start_date") or None
-    role = job_role or base.get("role") or data.get("title") or ""
     cfg = storage.get_llm(db)
+
+    # Re-extract when job row is missing company/role (LLM miss, old jobs, or no job_id).
+    placeholders = {"target company", "untitled co", "untitled", "company"}
+    need_meta = (
+        not job_company
+        or not job_role
+        or (job_company or "").strip().lower() in placeholders
+    )
+    if need_meta and jd.strip():
+        meta = improver.extract_job_metadata(jd, cfg)
+        if meta.get("company") and (
+            not job_company
+            or (job_company or "").strip().lower() in placeholders
+        ):
+            job_company = meta["company"]
+        job_role = job_role or meta.get("role")
+        job_location = job_location or meta.get("location")
+        job_employment_type = job_employment_type or meta.get("type")
+        job_salary = job_salary or meta.get("salary")
+        job_deadline = job_deadline or meta.get("deadline")
+        job_start_date = job_start_date or meta.get("startDate")
+
+    role = job_role or base.get("role") or data.get("title") or ""
     intensity = improver.normalize_intensity(body.intensity)
 
     result = improver.improve_resume(
@@ -145,7 +167,9 @@ def improve_preview(
 
     person = (data.get("name") or "").strip() or "Resume"
     # Prefer JD metadata for tracker/application fields; resume title stays in data
-    company = job_company or base.get("company") or "Target Company"
+    company = (job_company or "").strip() or None
+    if not company or company.lower() in placeholders:
+        company = "Target Company"
     app_role = job_role or new_data.get("title") or role or None
     location = job_location or base.get("location") or None
     employment_type = job_employment_type or base.get("employmentType") or None
@@ -186,6 +210,11 @@ def improve_preview(
         keywords=[schemas.KeywordHit(**h) for h in result["keywords"]],
         status="preview",
         data=schemas.ResumeData.model_validate(new_data),
+        company=None if company == "Target Company" else company,
+        role=app_role,
+        location=location,
+        employmentType=employment_type,
+        salary=salary,
     )
 
 
@@ -219,16 +248,53 @@ def confirm(rid: str, body: schemas.ConfirmReq, db: Connection = Depends(get_con
 
     if body.create_application:
         match = storage.match_rate_for_resume(db, rid)
+        company = (row["company"] or "").strip() or "Target Company"
+        app_role = (row["role"] or "").strip() or "Role"
+        location = row["location"]
+        employment_type = row["employment_type"]
+        salary = row["salary"]
+        deadline = row["deadline"]
+        start_date = row["start_date"]
+
+        placeholders = {"target company", "untitled co", "untitled", "company", "role"}
+        if company.lower() in placeholders or app_role.lower() in placeholders:
+            full = storage.get_resume(db, rid, with_data=True) or {}
+            jd = (full.get("jobDescription") or "").strip()
+            if jd:
+                meta = improver.extract_job_metadata(jd, storage.get_llm(db))
+                if company.lower() in placeholders and meta.get("company"):
+                    company = meta["company"]
+                    db.execute(
+                        "UPDATE resumes SET company=?, role=COALESCE(?, role), "
+                        "location=COALESCE(?, location), employment_type=COALESCE(?, employment_type), "
+                        "salary=COALESCE(?, salary) WHERE id=?",
+                        (
+                            company,
+                            meta.get("role") or app_role,
+                            meta.get("location") or location,
+                            meta.get("type") or employment_type,
+                            meta.get("salary") or salary,
+                            rid,
+                        ),
+                    )
+                if app_role.lower() in placeholders and meta.get("role"):
+                    app_role = meta["role"]
+                location = location or meta.get("location")
+                employment_type = employment_type or meta.get("type")
+                salary = salary or meta.get("salary")
+                deadline = deadline or meta.get("deadline")
+                start_date = start_date or meta.get("startDate")
+
         storage.create_application(
             db,
             {
-                "company": row["company"] or "Target Company",
-                "role": row["role"] or "Role",
-                "location": row["location"],
-                "employmentType": row["employment_type"],
-                "salary": row["salary"],
-                "deadline": row["deadline"],
-                "startDate": row["start_date"],
+                "company": company,
+                "role": app_role,
+                "location": location,
+                "employmentType": employment_type,
+                "salary": salary,
+                "deadline": deadline,
+                "startDate": start_date,
                 "status": "wish",
                 "resumeId": rid,
                 "match": match,

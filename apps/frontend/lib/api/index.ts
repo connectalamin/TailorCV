@@ -11,6 +11,7 @@ export {
   confirmTailor,
   downloadResumePdf,
   fetchJobDescription,
+  generateResumeTex,
   getMasterResumeId,
   ensureMasterLoaded,
   getSampleResume,

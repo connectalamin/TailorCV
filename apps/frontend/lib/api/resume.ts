@@ -187,7 +187,7 @@ export async function improveResume(
         title: `Tailored · ${data.name || data.title}`,
         isMaster: false,
         status: "preview",
-        company: "Target Company",
+        company: "Acme Cloud",
         role: data.title,
         updatedAt: new Date().toISOString(),
         data,
@@ -206,6 +206,8 @@ export async function improveResume(
       keywords: structuredClone(SAMPLE_KEYWORDS),
       status: "preview",
       data,
+      company: "Acme Cloud",
+      role: data.title,
     };
   }
   return jsonFetch<ImproveResult>(
@@ -226,7 +228,12 @@ export async function updateResume(
   patch: Partial<
     Pick<
       ResumeRecord,
-      "data" | "coverLetter" | "outreachMessage" | "jobDescription" | "title"
+      | "data"
+      | "coverLetter"
+      | "outreachMessage"
+      | "jobDescription"
+      | "title"
+      | "latexSource"
     >
   >,
 ): Promise<ResumeRecord> {
@@ -235,11 +242,17 @@ export async function updateResume(
     ensureLoaded();
     const idx = resumes.findIndex((r) => r.id === id);
     if (idx < 0) throw new Error("Resume not found");
-    resumes[idx] = {
+    const next = {
       ...resumes[idx],
       ...patch,
       updatedAt: new Date().toISOString(),
     };
+    if ("latexSource" in patch) {
+      const src = (patch.latexSource || "").trim();
+      if (src) next.latexSource = src;
+      else delete next.latexSource;
+    }
+    resumes[idx] = next;
     persist();
     return structuredClone(resumes[idx]);
   }
@@ -247,6 +260,47 @@ export async function updateResume(
     method: "PATCH",
     body: JSON.stringify(patch),
   });
+}
+
+export async function generateResumeTex(
+  data: ResumeData,
+  opts?: {
+    pageSize?: "A4" | "LETTER";
+    marginIn?: number;
+    projectsTwoColumn?: boolean;
+    atsSafe?: boolean;
+  },
+): Promise<string> {
+  const projectsTwoColumn = opts?.projectsTwoColumn ?? false;
+  const atsSafe = opts?.atsSafe ?? !projectsTwoColumn;
+  if (USE_MOCK_API) {
+    await delay(150);
+    return `% Mock TeX for ${data.name || "Candidate"}\n\\documentclass{article}\n\\begin{document}\n${data.name}\n\\end{document}\n`;
+  }
+  const res = await fetch(`${API_URL}/api/compile-resume/source`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      data,
+      pageSize: opts?.pageSize || "A4",
+      marginIn: opts?.marginIn ?? 0.6,
+      projectsTwoColumn,
+      atsSafe,
+    }),
+  });
+  if (!res.ok) {
+    let detail = `TeX generation failed (${res.status})`;
+    try {
+      const j = (await res.json()) as { error?: string; detail?: string };
+      if (j.error) detail = j.error;
+      else if (typeof j.detail === "string" && j.detail) detail = j.detail;
+    } catch {
+      /* ignore */
+    }
+    throw new Error(detail);
+  }
+  const body = (await res.json()) as { tex: string };
+  return body.tex;
 }
 
 export async function fetchJobDescription(
@@ -303,6 +357,8 @@ export async function downloadResumePdf(
     projectsTwoColumn?: boolean;
     /** Default true; set false when enabling two-column dense layout. */
     atsSafe?: boolean;
+    /** Raw TeX override (e.g. unsaved editor contents). */
+    tex?: string;
   },
 ): Promise<Blob> {
   let record: ResumeRecord | undefined;
@@ -320,18 +376,29 @@ export async function downloadResumePdf(
 
   const projectsTwoColumn = opts?.projectsTwoColumn ?? false;
   const atsSafe = opts?.atsSafe ?? !projectsTwoColumn;
+  const customTex =
+    opts?.tex !== undefined
+      ? opts.tex.trim()
+      : (record.latexSource || "").trim();
 
   const res = await fetch(`${API_URL}/api/compile-resume`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      data: record.data,
-      pageSize: opts?.pageSize || "A4",
-      marginIn: opts?.marginIn ?? 0.6,
-      projectsTwoColumn,
-      atsSafe,
-      filename: record.data.name,
-    }),
+    body: JSON.stringify(
+      customTex
+        ? {
+            tex: customTex,
+            filename: record.data.name,
+          }
+        : {
+            data: record.data,
+            pageSize: opts?.pageSize || "A4",
+            marginIn: opts?.marginIn ?? 0.6,
+            projectsTwoColumn,
+            atsSafe,
+            filename: record.data.name,
+          },
+    ),
   });
 
   if (!res.ok) {

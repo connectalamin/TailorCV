@@ -85,6 +85,8 @@ export type ResumeRecord = ResumeListItem & {
   jobDescription?: string;
   coverLetter?: string;
   outreachMessage?: string;
+  /** Custom LaTeX override; when set, PDF compile uses this instead of regenerating. */
+  latexSource?: string;
 };
 
 export type ApplicationStatus =
@@ -204,6 +206,11 @@ export type ImproveResult = {
   keywords: KeywordHit[];
   status: string;
   data?: ResumeData;
+  company?: string;
+  role?: string;
+  location?: string;
+  employmentType?: string;
+  salary?: string;
 };
 
 export type ContentIssueSeverity = "info" | "warn" | "fail";

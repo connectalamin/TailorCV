@@ -75,10 +75,37 @@ function formatWhen(iso: string | null | undefined): string {
 
 function defaultBase(provider: LLMProvider): string {
   if (provider === "ollama") return "http://host.docker.internal:11434";
+  if (provider === "openai_compatible") return "https://agentrouter.org/v1";
   return "";
 }
 
-function newEntry(provider: LLMProvider = "openai"): LLMEntry & { draftKey: string } {
+const AGENTROUTER_PRESETS: {
+  id: string;
+  label: string;
+  provider: LLMProvider;
+  model: string;
+  apiBase: string;
+  hint: string;
+}[] = [
+  {
+    id: "ar-openai",
+    label: "AgentRouter · GPT / OpenAI",
+    provider: "openai_compatible",
+    model: "gpt-5.5",
+    apiBase: "https://agentrouter.org/v1",
+    hint: "OpenAI Completions · use /v1 on the base URL",
+  },
+  {
+    id: "ar-opus",
+    label: "AgentRouter · Claude Opus",
+    provider: "anthropic",
+    model: "claude-opus-4-8",
+    apiBase: "https://agentrouter.org",
+    hint: "Anthropic Messages · base URL without /v1",
+  },
+];
+
+function newEntry(provider: LLMProvider = "openai_compatible"): LLMEntry & { draftKey: string } {
   const info = PROVIDER_INFO[provider];
   return {
     id: `e-${Date.now().toString(36)}`,
@@ -330,8 +357,40 @@ export default function SettingsPage() {
             <div className="settings-section">
               <h2 className="t-h2 text-[var(--text-primary)]">LLM connection</h2>
               <p className="t-body-sm mt-1 text-[var(--text-secondary)]">
-                Use one API, or add fallbacks that are tried in order when a call fails.
+                Use one API, or add fallbacks. In Multiple mode every call tries
+                providers in order until one succeeds (including bad/empty JSON
+                responses) — it does not stop after the first failure.
               </p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {AGENTROUTER_PRESETS.map((p) => (
+                  <button
+                    key={p.id}
+                    type="button"
+                    className="btn btn-ghost"
+                    title={p.hint}
+                    disabled={busy}
+                    onClick={() => {
+                      setEntries((list) => {
+                        const next = [...list];
+                        const target = next[0] ?? newEntry(p.provider);
+                        next[0] = {
+                          ...target,
+                          provider: p.provider,
+                          model: p.model,
+                          apiBase: p.apiBase,
+                        };
+                        return next;
+                      });
+                      setDirty(true);
+                      toast.message(`Filled ${p.label}`, {
+                        description: `${p.hint}. Paste your AgentRouter API key, then Save.`,
+                      });
+                    }}
+                  >
+                    {p.label}
+                  </button>
+                ))}
+              </div>
             </div>
 
             <div className="settings-section">
@@ -472,9 +531,14 @@ export default function SettingsPage() {
                             placeholder={
                               entry.provider === "ollama"
                                 ? "http://host.docker.internal:11434"
-                                : "https://api.example.com/v1"
+                                : "https://agentrouter.org/v1"
                             }
                           />
+                          <p className="hint">
+                            AgentRouter GPT/GLM:{" "}
+                            <span className="t-mono">https://agentrouter.org/v1</span>{" "}
+                            (include /v1 — TailorCV does not auto-append like Trae).
+                          </p>
                         </div>
                       ) : (
                         <div className="field">
@@ -486,8 +550,21 @@ export default function SettingsPage() {
                             onChange={(e) =>
                               patchEntry(entry.id, { apiBase: e.target.value })
                             }
-                            placeholder="Leave blank for provider default"
+                            placeholder={
+                              entry.provider === "anthropic"
+                                ? "https://agentrouter.org"
+                                : "Leave blank for provider default"
+                            }
                           />
+                          {entry.provider === "anthropic" ? (
+                            <p className="hint">
+                              AgentRouter Claude Opus:{" "}
+                              <span className="t-mono">https://agentrouter.org</span>{" "}
+                              with no /v1. Model IDs use hyphens, e.g.{" "}
+                              <span className="t-mono">claude-opus-4-8</span> (not{" "}
+                              <span className="t-mono">4.8</span>).
+                            </p>
+                          ) : null}
                         </div>
                       )}
 

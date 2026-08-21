@@ -68,6 +68,9 @@ def _rec(row: sqlite3.Row, with_data: bool = True) -> dict:
             d["coverLetter"] = row["cover_letter"]
         if row["outreach_message"]:
             d["outreachMessage"] = row["outreach_message"]
+        latex = _row_get(row, "latex_source")
+        if latex:
+            d["latexSource"] = latex
     return d
 
 
@@ -301,6 +304,7 @@ def update_resume(db: sqlite3.Connection, rid: str, patch: dict) -> Optional[dic
         "outreachMessage": ("outreach_message", lambda v: v),
         "jobDescription": ("job_description", lambda v: v),
         "title": ("title", lambda v: v),
+        "latexSource": ("latex_source", lambda v: (v or None) if isinstance(v, str) else v),
     }
     for k, (col, fn) in mapping.items():
         if k in patch:

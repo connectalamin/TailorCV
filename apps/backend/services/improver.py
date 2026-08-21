@@ -82,11 +82,65 @@ def extract_jd_skill_list(jd: str, cfg: dict) -> tuple[list[str], str]:
     return kw_svc.extract_overlap_keywords(text, limit=40), "local"
 
 
-def extract_job_metadata(jd: str, cfg: dict) -> dict:
+_BAD_COMPANY = re.compile(
+    r"^(?:target\s+company|untitled(?:\s+co)?|company|the\s+company|"
+    r"our\s+company|employer|organization|organisation|hiring\s+team|"
+    r"about\s+us|n/?a|unknown|null|none|"
+    r"remote|hybrid|onsite|on-site|worldwide|global|"
+    r"berlin|london|paris|amsterdam|munich|zurich|dublin|nyc|sf|"
+    r"san\s+francisco|new\s+york|los\s+angeles|toronto|singapore)$",
+    re.I,
+)
+
+
+_ROLE_TITLE = (
+    r"(?:Jr\.?|Junior|Senior|Sr\.?|Staff|Principal|Lead|Head(?:\s+of)?|"
+    r"Associate|Intern(?:ship)?|Entry[- ]Level)?\s*"
+    r"(?:Full[- ]?Stack|Front[- ]?End|Back[- ]?End|Software|Platform|"
+    r"DevOps|SRE|Data|ML|AI|Mobile|iOS|Android|Product|QA|Security|"
+    r"Cloud|Infrastructure)?\s*"
+    r"(?:Engineer(?:ing)?|Developer|Programmer|Architect|Scientist|"
+    r"Analyst|Designer|Manager|Consultant|Specialist|Intern)"
+    r"(?:\s+[IVX]+|\s+II+|\s+\d+)?"
+)
+
+
+def _clean_meta_field(val: Optional[str], *, maxlen: int = 200) -> Optional[str]:
+    if val is None:
+        return None
+    s = str(val).strip().strip("\"'`")
+    s = re.sub(r"\s+", " ", s)
+    if not s or s.lower() in ("null", "none", "n/a", "unknown", "-"):
+        return None
+    return s[:maxlen]
+
+
+def _looks_like_company(name: str) -> bool:
+    s = (name or "").strip()
+    if len(s) < 2 or len(s) > 80:
+        return False
+    if _BAD_COMPANY.match(s):
+        return False
+    # Location-ish fragments: "Berlin / Hybrid", "Remote - US"
+    if re.search(r"(?i)\b(remote|hybrid|onsite|on-site)\b", s) and len(s.split()) <= 4:
+        return False
+    if re.fullmatch(r"[A-Za-z .]+(?:\s*/\s*[A-Za-z .]+)+", s) and len(s) < 40:
+        # "Berlin / Hybrid" style — not a company
+        if not re.search(r"(?i)\b(inc|llc|ltd|gmbh|corp|labs?|soft|tech|systems?)\b", s):
+            return False
+    if re.search(_ROLE_TITLE, s, re.I) and len(s.split()) <= 4:
+        return False
+    if re.search(r"https?://|www\.|@", s, re.I):
+        return False
+    return bool(re.search(r"[A-Za-z]", s))
+
+
+def heuristic_job_metadata(jd: str) -> dict:
     """
-    Company/role plus optional location/type/salary/deadline/startDate from a JD.
-    LLM only — empty fields when the model cannot extract them.
+    Best-effort company/role/location/type from plain JD text when LLM is
+    unavailable or returns empty fields.
     """
+    text = (jd or "").strip()
     meta: dict = {
         "company": None,
         "role": None,
@@ -96,14 +150,126 @@ def extract_job_metadata(jd: str, cfg: dict) -> dict:
         "deadline": None,
         "startDate": None,
     }
-    if not jd.strip() or not llm_svc.is_configured(cfg):
+    if not text:
         return meta
 
-    llm_meta = llm_svc.extract_job_metadata(jd, cfg)
-    if llm_meta:
-        for key in meta:
-            if llm_meta.get(key):
-                meta[key] = llm_meta[key]
+    lines = [ln.strip() for ln in text.replace("\r\n", "\n").split("\n") if ln.strip()]
+    head = "\n".join(lines[:12])
+    head_flat = re.sub(r"\s+", " ", head)
+
+    company_patterns = [
+        r"(?i)\b(?:at|@)\s+([A-Z][\w.&'’-]+(?:\s+[A-Z][\w.&'’-]+){0,4})\b",
+        r"(?i)\bjoin\s+([A-Z][\w.&'’-]+(?:\s+[A-Z][\w.&'’-]+){0,4})\b",
+        r"(?i)\b([A-Z][\w.&'’-]+(?:\s+[A-Z][\w.&'’-]+){0,4})\s+is\s+hiring\b",
+        r"(?i)\b(?:company|employer|organization|organisation)\s*[:\-–—]\s*([^\n|,;]{2,80})",
+        r"(?i)\babout\s+([A-Z][\w.&'’-]+(?:\s+[A-Z][\w.&'’-]+){0,4})\b",
+        r"(?i)\b(?:working|work)\s+(?:at|with)\s+([A-Z][\w.&'’-]+(?:\s+[A-Z][\w.&'’-]+){0,4})\b",
+    ]
+    for pat in company_patterns:
+        m = re.search(pat, head)
+        if not m:
+            continue
+        cand = _clean_meta_field(m.group(1))
+        if cand and _looks_like_company(cand):
+            meta["company"] = cand
+            break
+
+    if not meta["company"]:
+        # "Role — Company" / "Role at Company" on first line
+        first = lines[0] if lines else ""
+        m = re.match(
+            rf"(?i)^({_ROLE_TITLE})\s*(?:[-–—|@]|at)\s+(.+)$",
+            first,
+        )
+        if m:
+            role = _clean_meta_field(m.group(1))
+            company = _clean_meta_field(m.group(2).split("|")[0].split(",")[0])
+            if role:
+                meta["role"] = role
+            if company and _looks_like_company(company):
+                meta["company"] = company
+
+    if not meta["company"]:
+        # apply@acme.com / careers@acme.io → Acme
+        m = re.search(
+            r"(?i)\b(?:apply|careers|jobs|talent|hr)@([a-z0-9-]+)\.(?:com|io|co|ai|dev|net|org)\b",
+            text,
+        )
+        if m:
+            slug = m.group(1).replace("-", " ").strip()
+            if slug and slug.lower() not in ("gmail", "yahoo", "outlook", "hotmail", "email"):
+                meta["company"] = slug.title()
+
+    if not meta["role"]:
+        m = re.search(rf"(?i)\b({_ROLE_TITLE})\b", head_flat)
+        if m:
+            meta["role"] = _clean_meta_field(m.group(1))
+
+    if not meta["location"]:
+        m = re.search(
+            r"(?i)\b(?:location|based\s+in|office)\s*[:\-–—]?\s*"
+            r"([A-Za-z][A-Za-z .,/()-]{1,60})",
+            head,
+        )
+        if m:
+            loc = _clean_meta_field(m.group(1).split("\n")[0])
+            if loc and not re.search(r"(?i)\b(requirements?|responsibilit)", loc):
+                meta["location"] = loc
+        elif re.search(r"(?i)\bremote\b", head_flat):
+            meta["location"] = "Remote"
+        elif re.search(r"(?i)\bhybrid\b", head_flat):
+            meta["location"] = "Hybrid"
+
+    if not meta["type"]:
+        if re.search(r"(?i)\bfull[-\s]?time\b", text):
+            meta["type"] = "full-time"
+        elif re.search(r"(?i)\bpart[-\s]?time\b", text):
+            meta["type"] = "part-time"
+        elif re.search(r"(?i)\bcontract(?:or|ing)?\b", text):
+            meta["type"] = "contract"
+        elif re.search(r"(?i)\bintern(?:ship)?\b", text):
+            meta["type"] = "internship"
+
+    if not meta["salary"]:
+        m = re.search(
+            r"(?i)(?:salary|compensation|pay)\s*[:\-–—]?\s*"
+            r"([€$£][\d,.]+\s*[kK]?(?:\s*[-–—to]+\s*[€$£]?[\d,.]+\s*[kK]?)?"
+            r"(?:\s*(?:per\s+year|/yr|/year|annually|a year))?)|"
+            r"([€$£][\d,.]+\s*[kK]?\s*[-–—]\s*[€$£]?[\d,.]+\s*[kK]?)",
+            text,
+        )
+        if m:
+            meta["salary"] = _clean_meta_field(next(g for g in m.groups() if g), maxlen=300)
+
+    return meta
+
+
+def extract_job_metadata(jd: str, cfg: dict) -> dict:
+    """
+    Company/role plus optional location/type/salary/deadline/startDate from a JD.
+    LLM first when configured; heuristic fills any gaps (and runs alone without LLM).
+    """
+    heuristic = heuristic_job_metadata(jd)
+    meta = dict(heuristic)
+
+    if not (jd or "").strip():
+        return meta
+
+    if llm_svc.is_configured(cfg):
+        llm_meta = llm_svc.extract_job_metadata(jd, cfg)
+        if llm_meta:
+            for key in meta:
+                val = _clean_meta_field(llm_meta.get(key), maxlen=300 if key == "salary" else 200)
+                if not val:
+                    continue
+                if key == "company" and not _looks_like_company(val):
+                    continue
+                meta[key] = val
+
+    # Never keep placeholder company names
+    if meta.get("company") and _BAD_COMPANY.match(str(meta["company"])):
+        meta["company"] = heuristic.get("company")
+
     return meta
 
 

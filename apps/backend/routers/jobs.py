@@ -34,7 +34,14 @@ def create_job(body: schemas.JobsReq, db: Connection = Depends(get_conn)):
         deadline=meta.get("deadline"),
         start_date=meta.get("startDate"),
     )
-    return schemas.JobsOut(job_id=rec["job_id"])
+    return schemas.JobsOut(
+        job_id=rec["job_id"],
+        company=meta.get("company"),
+        role=meta.get("role"),
+        location=meta.get("location"),
+        employmentType=meta.get("type"),
+        salary=meta.get("salary"),
+    )
 
 
 @router.post("/jobs/analyze", response_model=list[schemas.KeywordHit])

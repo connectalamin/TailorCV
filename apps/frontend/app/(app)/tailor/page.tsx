@@ -227,6 +227,22 @@ export default function TailorPage() {
               <p className="font-mono text-[10px] uppercase tracking-wider text-sub">
                 Preview · {preview.intensity} · not saved until confirm
               </p>
+              <p className="t-body-sm text-[var(--text-secondary)]">
+                {preview.company || preview.role ? (
+                  <>
+                    Application:{" "}
+                    <strong className="text-[var(--text-primary)]">
+                      {[preview.company, preview.role].filter(Boolean).join(" · ")}
+                    </strong>
+                  </>
+                ) : (
+                  <>
+                    Company not found in the JD — tracker will show “Target
+                    Company”. Paste a posting that names the employer, or edit
+                    it later in Tracker.
+                  </>
+                )}
+              </p>
               {preview.keywords?.length ? (
                 <p className="tailor-kw">
                   Keywords:{" "}

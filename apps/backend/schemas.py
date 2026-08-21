@@ -67,6 +67,8 @@ class ResumeRecord(ResumeListItem):
     jobDescription: Optional[str] = None
     coverLetter: Optional[str] = None
     outreachMessage: Optional[str] = None
+    # Optional custom LaTeX; when set, PDF compile uses this instead of regenerating.
+    latexSource: Optional[str] = None
 
 
 class ResumePatch(BaseModel):
@@ -75,6 +77,8 @@ class ResumePatch(BaseModel):
     outreachMessage: Optional[str] = None
     jobDescription: Optional[str] = None
     title: Optional[str] = None
+    # Pass empty string to clear a saved TeX override.
+    latexSource: Optional[str] = None
 
 
 class Application(BaseModel):
@@ -208,6 +212,11 @@ class JobsReq(BaseModel):
 
 class JobsOut(BaseModel):
     job_id: str
+    company: Optional[str] = None
+    role: Optional[str] = None
+    location: Optional[str] = None
+    employmentType: Optional[str] = None
+    salary: Optional[str] = None
 
 
 class AnalyzeReq(BaseModel):
@@ -238,6 +247,11 @@ class ImproveOut(BaseModel):
     keywords: list[KeywordHit] = Field(default_factory=list)
     status: str = "preview"
     data: Optional[ResumeData] = None
+    company: Optional[str] = None
+    role: Optional[str] = None
+    location: Optional[str] = None
+    employmentType: Optional[str] = None
+    salary: Optional[str] = None
 
 
 class ConfirmReq(BaseModel):
@@ -370,6 +384,18 @@ class CompileReq(BaseModel):
     projectsTwoColumn: Optional[bool] = None
     # When true (default), force single-column skills/projects/pairs for ATS parsers.
     atsSafe: Optional[bool] = None
+
+
+class TexSourceReq(BaseModel):
+    data: ResumeData
+    pageSize: Optional[Literal["A4", "LETTER"]] = None
+    marginIn: Optional[float] = None
+    projectsTwoColumn: Optional[bool] = None
+    atsSafe: Optional[bool] = None
+
+
+class TexSourceOut(BaseModel):
+    tex: str
 
 
 class CompileStatus(BaseModel):

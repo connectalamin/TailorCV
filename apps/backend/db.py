@@ -24,6 +24,7 @@ CREATE TABLE IF NOT EXISTS resumes (
   job_description TEXT,
   cover_letter    TEXT,
   outreach_message TEXT,
+  latex_source    TEXT,
   preview_hash    TEXT,
   intensity       TEXT,
   parent_id       TEXT
@@ -100,6 +101,7 @@ def _migrate(conn: sqlite3.Connection) -> None:
         {
             "intensity": "TEXT",
             "parent_id": "TEXT",
+            "latex_source": "TEXT",
             **meta_cols,
         },
     )

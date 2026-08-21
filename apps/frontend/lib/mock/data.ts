@@ -337,12 +337,13 @@ export const PROVIDER_INFO = {
   openai: { name: "OpenAI", defaultModel: "gpt-4o-mini", requiresKey: true },
   openai_compatible: {
     name: "OpenAI Compatible",
-    defaultModel: "gpt-4o-mini",
+    defaultModel: "gpt-5.5",
     requiresKey: true,
+    requiresBase: true,
   },
   anthropic: {
     name: "Anthropic",
-    defaultModel: "claude-haiku-4-5-20251001",
+    defaultModel: "claude-opus-4-8",
     requiresKey: true,
   },
   openrouter: {

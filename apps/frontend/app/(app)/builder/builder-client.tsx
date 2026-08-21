@@ -24,6 +24,7 @@ import {
   downloadResumePdf,
   fetchResume,
   getSampleResume,
+  generateResumeTex,
   improveResume,
   restructureResume,
   updateResume,
@@ -52,7 +53,7 @@ import {
 } from "@/lib/utils/keyword-matcher";
 import { toast } from "sonner";
 
-type DocTab = "resume" | "cover" | "outreach" | "jd";
+type DocTab = "resume" | "tex" | "cover" | "outreach" | "jd";
 
 const SETTINGS_KEY = "resume_builder_settings";
 const DRAFT_KEY = "resume_builder_draft";
@@ -63,6 +64,7 @@ const PANEL_W_MAX = 560;
 
 const DOC_TABS: { id: DocTab; label: string }[] = [
   { id: "resume", label: "Resume" },
+  { id: "tex", label: "TeX" },
   { id: "cover", label: "Cover letter" },
   { id: "outreach", label: "Outreach mail" },
   { id: "jd", label: "ATS fit" },
@@ -105,6 +107,10 @@ export default function BuilderClient() {
   const [outreach, setOutreach] = useState("");
   const [subject, setSubject] = useState("");
   const [jd, setJd] = useState("");
+  const [latexSource, setLatexSource] = useState("");
+  const [texDirty, setTexDirty] = useState(false);
+  const [texBusy, setTexBusy] = useState(false);
+  const [texLoaded, setTexLoaded] = useState(false);
   const [zoom, setZoom] = useState(0.78);
   const [busy, setBusy] = useState(false);
   const [aiBusy, setAiBusy] = useState(false);
@@ -144,12 +150,15 @@ export default function BuilderClient() {
 
   const load = useCallback(async () => {
     setSettings(loadSettings());
+    setTexLoaded(false);
+    setTexDirty(false);
     if (!id) {
       const sample = getSampleResume();
       setData(sample);
       setCover(defaultCoverLetter(sample));
       setOutreach(defaultOutreachMail(sample));
       setSubject(`Interest in ${sample.title}`);
+      setLatexSource("");
       return;
     }
     try {
@@ -164,11 +173,14 @@ export default function BuilderClient() {
           : `Interest in ${r.role || r.data.title}`,
       );
       setJd(r.jobDescription || "");
+      setLatexSource(r.latexSource || "");
+      if (r.latexSource) setTexLoaded(true);
     } catch {
       const sample = getSampleResume();
       setData(sample);
       setCover(defaultCoverLetter(sample));
       setOutreach(defaultOutreachMail(sample));
+      setLatexSource("");
     }
   }, [id]);
 
@@ -239,8 +251,10 @@ export default function BuilderClient() {
         coverLetter: cover,
         outreachMessage: outreach,
         jobDescription: jd || undefined,
+        latexSource: latexSource.trim() ? latexSource : "",
       });
       setRecord(next);
+      setTexDirty(false);
       toast.success("Saved");
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Save failed");
@@ -259,6 +273,7 @@ export default function BuilderClient() {
         projectsTwoColumn: settings.projectsTwoColumn,
         // Dense two-column layout opts out of strict ATS single-column mode.
         atsSafe: !settings.projectsTwoColumn,
+        tex: texLoaded ? latexSource : undefined,
       });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
@@ -271,6 +286,67 @@ export default function BuilderClient() {
       toast.error(e instanceof Error ? e.message : "Download failed");
     } finally {
       setBusy(false);
+    }
+  }
+
+  const compileOpts = useCallback(() => {
+    return {
+      pageSize: settings.pageSize,
+      marginIn: Number((settings.margins.top / 25.4).toFixed(2)),
+      projectsTwoColumn: settings.projectsTwoColumn,
+      atsSafe: !settings.projectsTwoColumn,
+    };
+  }, [settings]);
+
+  async function ensureTexLoaded(force = false) {
+    if (texLoaded && !force && latexSource.trim()) return;
+    setTexBusy(true);
+    try {
+      const tex = await generateResumeTex(data, compileOpts());
+      setLatexSource(tex);
+      setTexLoaded(true);
+      setTexDirty(false);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not generate TeX");
+    } finally {
+      setTexBusy(false);
+    }
+  }
+
+  async function onRegenerateTex() {
+    setTexBusy(true);
+    try {
+      const tex = await generateResumeTex(data, compileOpts());
+      setLatexSource(tex);
+      setTexLoaded(true);
+      setTexDirty(true);
+      toast.success("TeX regenerated from resume fields");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not generate TeX");
+    } finally {
+      setTexBusy(false);
+    }
+  }
+
+  async function onDownloadTexFile() {
+    const src = latexSource.trim();
+    if (!src) {
+      toast.message("Generate or paste TeX first");
+      return;
+    }
+    const blob = new Blob([src], { type: "application/x-tex" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${(data.name || "resume").replace(/\s+/g, "_")}.tex`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function onSelectTab(next: DocTab) {
+    setTab(next);
+    if (next === "tex") {
+      void ensureTexLoaded(false);
     }
   }
 
@@ -639,7 +715,7 @@ export default function BuilderClient() {
             role="tab"
             aria-selected={tab === t.id}
             className="builder-tab"
-            onClick={() => setTab(t.id)}
+            onClick={() => onSelectTab(t.id)}
           >
             {t.label}
           </button>
@@ -898,6 +974,66 @@ export default function BuilderClient() {
                   </div>
                 ))}
               </div>
+            </div>
+          ) : null}
+
+          {tab === "tex" ? (
+            <div className="flex h-full flex-col gap-3 p-4">
+              <div>
+                <p className="t-caption">LaTeX source</p>
+                <p className="t-body-sm mt-1 text-[var(--text-secondary)]">
+                  Edit the generated{" "}
+                  <span className="font-mono text-[12px]">.tex</span> used for
+                  PDF. Saved overrides the Resume-tab form until you regenerate.
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="t-body-sm text-[var(--text-muted)]">
+                  {texBusy
+                    ? "Generating…"
+                    : texDirty
+                      ? "Unsaved edits"
+                      : latexSource.trim()
+                        ? `${latexSource.split("\n").length} lines`
+                        : "Not loaded"}
+                </span>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    className="btn btn-ghost"
+                    disabled={texBusy}
+                    onClick={() => void onRegenerateTex()}
+                  >
+                    Regenerate
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-ghost"
+                    disabled={!latexSource.trim()}
+                    onClick={() => void onDownloadTexFile()}
+                  >
+                    Download .tex
+                  </button>
+                </div>
+              </div>
+              <div className="field flex-1">
+                <textarea
+                  className="builder-resize-y min-h-[420px] w-full flex-1 font-[family-name:var(--mono)] text-[12px] leading-relaxed"
+                  value={latexSource}
+                  spellCheck={false}
+                  disabled={texBusy && !latexSource}
+                  onChange={(e) => {
+                    setLatexSource(e.target.value);
+                    setTexDirty(true);
+                    setTexLoaded(true);
+                  }}
+                  placeholder="\\documentclass[10.5pt, a4paper]{article}…"
+                />
+              </div>
+              <p className="t-body-sm text-[var(--text-muted)]">
+                Save to keep this TeX. Download PDF compiles this source when it
+                is non-empty.
+              </p>
             </div>
           ) : null}
 
@@ -1312,7 +1448,7 @@ export default function BuilderClient() {
         />
 
         <section className="flex min-h-0 min-w-0 flex-1 flex-col">
-          {tab !== "jd" ? (
+          {tab !== "jd" && tab !== "tex" ? (
             <div className="flex items-center gap-1.5 border-b border-[var(--border)] bg-[var(--surface-1)] px-4 py-2">
               <button
                 type="button"
@@ -1411,6 +1547,34 @@ export default function BuilderClient() {
                     </div>
                   </div>
                 ))}
+              </div>
+            ) : null}
+
+            {tab === "tex" ? (
+              <div className="mx-auto w-full max-w-[920px]">
+                <div className="panel overflow-hidden p-0">
+                  <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--border)] px-4 py-2.5">
+                    <div>
+                      <h3 className="t-h3">Source preview</h3>
+                      <p className="t-body-sm text-[var(--text-muted)]">
+                        {latexSource.trim()
+                          ? "This TeX is what Download PDF compiles when non-empty."
+                          : "Open Regenerate to build TeX from the Resume tab."}
+                      </p>
+                    </div>
+                    {record?.latexSource ? (
+                      <span className="page-pill ok">Saved override</span>
+                    ) : texDirty ? (
+                      <span className="page-pill warn">Unsaved</span>
+                    ) : null}
+                  </div>
+                  <pre className="max-h-[75vh] overflow-auto whitespace-pre p-4 font-[family-name:var(--mono)] text-[12px] leading-relaxed text-[var(--text-primary)]">
+                    {texBusy && !latexSource.trim()
+                      ? "Generating LaTeX…"
+                      : latexSource.trim() ||
+                        "% TeX will appear here after generate"}
+                  </pre>
+                </div>
               </div>
             ) : null}
 
